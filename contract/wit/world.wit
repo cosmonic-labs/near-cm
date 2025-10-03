@@ -1,0 +1,14 @@
+package myapp:app@0.1.0;
+
+interface custom {
+    record test-record {
+        foo: string,
+        bar: string,
+    }
+
+    foo: func(t: test-record) -> u64;
+}
+
+world app {
+    export custom;
+}

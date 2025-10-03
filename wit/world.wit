@@ -1,0 +1,58 @@
+package rvolosatovs:serde@0.1.0;
+
+interface deserializer {
+    resource error {
+        to-string: func() -> string;
+    }
+
+    resource tuple-deserializer {
+        next: static func(this: tuple-deserializer) -> tuple<deserializer, tuple-deserializer>;
+    }
+
+    resource record-deserializer {
+        next: static func(this: record-deserializer) -> tuple<u32, deserializer, record-deserializer>;
+    }
+
+    resource sized-list-deserializer {
+        next: static func(this: sized-list-deserializer) -> tuple<deserializer, sized-list-deserializer>;
+    }
+
+    resource unsized-list-deserializer {
+        next: static func(this: unsized-list-deserializer) -> option<tuple<deserializer, unsized-list-deserializer>>;
+    }
+
+    variant list-deserializer {
+        sized(sized-list-deserializer),
+        unsized(unsized-list-deserializer),
+    }
+
+    resource deserializer {
+        from-list: static func(buf: list<u8>) -> deserializer;
+
+        deserialize-u8: static func(this: deserializer) -> result<u8, error>;
+        deserialize-s8: static func(this: deserializer) -> result<s8, error>;
+        deserialize-u16: static func(this: deserializer) -> result<u16, error>;
+        deserialize-s16: static func(this: deserializer) -> result<s16, error>;
+        deserialize-u32: static func(this: deserializer) -> result<u32, error>;
+        deserialize-s32: static func(this: deserializer) -> result<s32, error>;
+        deserialize-u64: static func(this: deserializer) -> result<u64, error>;
+        deserialize-s64: static func(this: deserializer) -> result<s64, error>;
+        deserialize-f32: static func(this: deserializer) -> result<f32, error>;
+        deserialize-f64: static func(this: deserializer) -> result<f64, error>;
+        deserialize-char: static func(this: deserializer) -> result<char, error>;
+        deserialize-bytes: static func(this: deserializer) -> result<list<u8>, error>;
+        deserialize-string: static func(this: deserializer) -> result<string, error>;
+        deserialize-record: static func(this: deserializer, fields: list<string>) -> result<tuple<u32, deserializer, record-deserializer>, error>;
+        deserialize-variant: static func(this: deserializer, cases: list<tuple<string, bool>>) -> result<tuple<u32, deserializer>, error>;
+        deserialize-list: static func(this: deserializer) -> result<list-deserializer, error>;
+        deserialize-tuple: static func(this: deserializer, n: u32) -> result<tuple<deserializer, tuple-deserializer>, error>;
+        deserialize-flags: static func(this: deserializer, cases: list<string>) -> result<u32, error>;
+        deserialize-enum: static func(this: deserializer, cases: list<string>) -> result<u32, error>;
+        deserialize-option: static func(this: deserializer, payload: bool) -> result<option<deserializer>, error>;
+        deserialize-result: static func(this: deserializer, ok: bool, err: bool) -> result<result<deserializer, deserializer>, error>;
+    }
+}
+
+world format {
+    export deserializer;
+}
