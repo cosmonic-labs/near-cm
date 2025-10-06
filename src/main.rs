@@ -6,26 +6,45 @@ mod bindings {
     });
 }
 
-use core::iter::zip;
 use core::mem;
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use anyhow::{anyhow, Context as _};
+use anyhow::{Context as _, anyhow};
 use bytes::{Buf, Bytes};
 use http_body_util::BodyExt as _;
 use hyper::body::Incoming;
 use hyper_util::rt::TokioIo;
+use tokio::fs;
 use tokio::net::TcpListener;
 use url::Url;
-use wasmtime::component::{types, Component, InstancePre, Linker, ResourceAny, Type, Val};
+use wasmtime::component::{Component, InstancePre, Linker, ResourceAny, Type, Val, types};
 use wasmtime::{Engine, Store};
 use wit_component::ComponentEncoder;
 
 use bindings::exports::rvolosatovs::serde::deserializer::Guest;
 
 pub struct Error;
+
+async fn handle_deserialized_value<T>(
+    store: &mut Store<()>,
+    instance: &Guest,
+    res: Result<T, ResourceAny>,
+    v: &mut Val,
+    mk_val: impl FnOnce(T) -> Val,
+) -> wasmtime::Result<()> {
+    match res {
+        Ok(de) => {
+            *v = mk_val(de);
+            Ok(())
+        }
+        Err(err) => {
+            let s = instance.error().call_to_string(store, err).await?;
+            Err(anyhow!(s).context("failed to deserialize string"))
+        }
+    }
+}
 
 async fn deserialize(
     store: &mut Store<()>,
@@ -36,28 +55,103 @@ async fn deserialize(
 ) -> wasmtime::Result<()> {
     #[expect(unused, reason = "incomplete")]
     match ty {
-        Type::Bool => todo!(),
-        Type::S8 => todo!(),
-        Type::U8 => todo!(),
-        Type::S16 => todo!(),
-        Type::U16 => todo!(),
-        Type::S32 => todo!(),
-        Type::U32 => todo!(),
-        Type::S64 => todo!(),
-        Type::U64 => todo!(),
-        Type::Float32 => todo!(),
-        Type::Float64 => todo!(),
-        Type::Char => todo!(),
+        Type::Bool => {
+            let res = instance
+                .deserializer()
+                .call_deserialize_bool(&mut *store, de)
+                .await?;
+            handle_deserialized_value(store, instance, res, v, Val::Bool).await
+        }
+        Type::S8 => {
+            let res = instance
+                .deserializer()
+                .call_deserialize_s8(&mut *store, de)
+                .await?;
+            handle_deserialized_value(store, instance, res, v, Val::S8).await
+        }
+        Type::U8 => {
+            let res = instance
+                .deserializer()
+                .call_deserialize_u8(&mut *store, de)
+                .await?;
+            handle_deserialized_value(store, instance, res, v, Val::U8).await
+        }
+        Type::S16 => {
+            let res = instance
+                .deserializer()
+                .call_deserialize_s16(&mut *store, de)
+                .await?;
+            handle_deserialized_value(store, instance, res, v, Val::S16).await
+        }
+        Type::U16 => {
+            let res = instance
+                .deserializer()
+                .call_deserialize_u16(&mut *store, de)
+                .await?;
+            handle_deserialized_value(store, instance, res, v, Val::U16).await
+        }
+        Type::S32 => {
+            let res = instance
+                .deserializer()
+                .call_deserialize_s32(&mut *store, de)
+                .await?;
+            handle_deserialized_value(store, instance, res, v, Val::S32).await
+        }
+        Type::U32 => {
+            let res = instance
+                .deserializer()
+                .call_deserialize_u32(&mut *store, de)
+                .await?;
+            handle_deserialized_value(store, instance, res, v, Val::U32).await
+        }
+        Type::S64 => {
+            let res = instance
+                .deserializer()
+                .call_deserialize_s64(&mut *store, de)
+                .await?;
+            handle_deserialized_value(store, instance, res, v, Val::S64).await
+        }
+        Type::U64 => {
+            let res = instance
+                .deserializer()
+                .call_deserialize_u64(&mut *store, de)
+                .await?;
+            handle_deserialized_value(store, instance, res, v, Val::U64).await
+        }
+        Type::Float32 => {
+            let res = instance
+                .deserializer()
+                .call_deserialize_f32(&mut *store, de)
+                .await?;
+            handle_deserialized_value(store, instance, res, v, Val::Float32).await
+        }
+        Type::Float64 => {
+            let res = instance
+                .deserializer()
+                .call_deserialize_f64(&mut *store, de)
+                .await?;
+            handle_deserialized_value(store, instance, res, v, Val::Float64).await
+        }
+        Type::Char => {
+            let res = instance
+                .deserializer()
+                .call_deserialize_char(&mut *store, de)
+                .await?;
+            handle_deserialized_value(store, instance, res, v, Val::Char).await
+        }
         Type::String => match instance
             .deserializer()
-            .call_deserialize_string(store, de)
+            .call_deserialize_string(&mut *store, de)
             .await?
         {
             Ok(s) => {
                 *v = Val::String(s);
                 Ok(())
             }
-            Err(_) => todo!(),
+            Err(err) => {
+                let s = instance.error().call_to_string(store, err).await?;
+                Err(anyhow!(s).context("failed to deserialize string"))
+            }
         },
         Type::List(ty) => todo!(),
         Type::Record(ty) => {
@@ -127,7 +221,47 @@ async fn deserialize(
                 }
             }
         }
-        Type::Tuple(ty) => todo!(),
+        Type::Tuple(ty) => {
+            let mut tys = ty.types();
+            let num_elements = tys.len();
+            match instance
+                .deserializer()
+                .call_deserialize_tuple(&mut *store, de, num_elements as _)
+                .await?
+            {
+                Ok((mut de, mut iter)) => {
+                    let mut vs = Vec::with_capacity(num_elements);
+                    let mut ev = Val::Bool(false);
+                    let ty = tys
+                        .next()
+                        .context("failed to get first tuple element type")?;
+                    Box::pin(deserialize(&mut *store, de, instance, ty, &mut ev))
+                        .await
+                        .context("failed to deserialize first tuple element")?;
+                    vs.push(ev);
+                    for ty in tys {
+                        let next = instance
+                            .tuple_deserializer()
+                            .call_next(&mut *store, iter)
+                            .await
+                            .context("failed to call `next`")?;
+                        de = next.0;
+                        iter = next.1;
+                        let mut ev = Val::Bool(false);
+                        Box::pin(deserialize(&mut *store, de, instance, ty, &mut ev))
+                            .await
+                            .context("failed to deserialize tuple element")?;
+                        vs.push(ev);
+                    }
+                    *v = Val::Tuple(vs);
+                    Ok(())
+                }
+                Err(err) => {
+                    let err = instance.error().call_to_string(store, err).await?;
+                    Err(anyhow!(err))
+                }
+            }
+        }
         Type::Variant(ty) => todo!(),
         Type::Enum(ty) => todo!(),
         Type::Option(ty) => todo!(),
@@ -138,6 +272,60 @@ async fn deserialize(
         Type::Future(ty) => todo!(),
         Type::Stream(ty) => todo!(),
         Type::ErrorContext => todo!(),
+    }
+}
+
+async fn deserialize_params(
+    store: &mut Store<()>,
+    instance: &Guest,
+    ty: &types::ComponentFunc,
+    body: hyper::body::Incoming,
+) -> wasmtime::Result<Vec<Val>> {
+    let mut tys = ty.params();
+    let num_params = tys.len();
+    if num_params == 0 {
+        // TODO: Ensure that body is empty
+        return Ok(Vec::default());
+    }
+    let body = body.collect().await?;
+    let de = instance
+        .deserializer()
+        .call_from_list(&mut *store, &body.to_bytes())
+        .await?;
+
+    match instance
+        .deserializer()
+        .call_deserialize_tuple(&mut *store, de, num_params as _)
+        .await?
+    {
+        Ok((mut de, mut iter)) => {
+            let mut vs = Vec::with_capacity(num_params);
+            let mut pv = Val::Bool(false);
+            let (name, ty) = tys.next().context("failed to get first parameter type")?;
+            Box::pin(deserialize(&mut *store, de, instance, ty, &mut pv))
+                .await
+                .with_context(|| format!("failed to deserialize param `{name}`"))?;
+            vs.push(pv);
+            for (name, ty) in tys {
+                let next = instance
+                    .tuple_deserializer()
+                    .call_next(&mut *store, iter)
+                    .await
+                    .context("failed to call `next`")?;
+                de = next.0;
+                iter = next.1;
+                let mut pv = Val::Bool(false);
+                Box::pin(deserialize(&mut *store, de, instance, ty, &mut pv))
+                    .await
+                    .with_context(|| format!("failed to deserialize param `{name}`"))?;
+                vs.push(pv);
+            }
+            Ok(vs)
+        }
+        Err(err) => {
+            let err = instance.error().call_to_string(store, err).await?;
+            Err(anyhow!(err))
+        }
     }
 }
 
@@ -405,41 +593,50 @@ async fn main() -> wasmtime::Result<()> {
                                 );
                             }
                         };
-                        let res = match reqwest::get(url).await {
-                            Ok(codec) => codec,
-                            Err(err) => {
-                                return build_http_response(
-                                    http::StatusCode::BAD_REQUEST,
-                                    format!("Failed to fetch codec from `{codec}`: {err}"),
-                                );
+                        let mut codec = if let Ok(path) = url.to_file_path() {
+                            match fs::read(&path).await {
+                                Ok(codec) => ComponentEncoder::default().module(&codec)?,
+                                Err(err) => {
+                                    return build_http_response(
+                                        http::StatusCode::BAD_REQUEST,
+                                        format!(
+                                            "Failed to read codec bytes from `{}`: {err}",
+                                            path.to_string_lossy()
+                                        ),
+                                    );
+                                }
+                            }
+                        } else {
+                            let res = match reqwest::get(url).await {
+                                Ok(codec) => codec,
+                                Err(err) => {
+                                    return build_http_response(
+                                        http::StatusCode::BAD_REQUEST,
+                                        format!("Failed to fetch codec from `{codec}`: {err}"),
+                                    );
+                                }
+                            };
+                            match res.bytes().await {
+                                Ok(codec) => ComponentEncoder::default().module(&codec)?,
+                                Err(err) => {
+                                    return build_http_response(
+                                        http::StatusCode::BAD_REQUEST,
+                                        format!(
+                                            "Failed to fetch codec bytes from `{codec}`: {err}"
+                                        ),
+                                    );
+                                }
                             }
                         };
-                        let codec = match res.bytes().await {
-                            Ok(codec) => codec,
-                            Err(err) => {
-                                return build_http_response(
-                                    http::StatusCode::BAD_REQUEST,
-                                    format!("Failed to fetch codec bytes from `{codec}`: {err}"),
-                                );
-                            }
-                        };
-
-                        let mut store = Store::new(engine, ());
-
-                        let mut codec = ComponentEncoder::default().module(&codec)?;
                         let codec = codec.encode()?;
                         let codec = Component::new(engine, codec)?;
                         let linker = Linker::new(engine);
+                        let mut store = Store::new(engine, ());
                         let codec =
                             bindings::Format::instantiate_async(&mut store, &codec, &linker)
                                 .await?;
                         let codec = codec.rvolosatovs_serde_deserializer();
 
-                        let body = body.collect().await?;
-                        let de = codec
-                            .deserializer()
-                            .call_from_list(&mut store, &body.to_bytes())
-                            .await?;
                         let (func, ty) = if let Some((instance, func)) = func.split_once('#') {
                             let Some(types::ComponentItem::ComponentInstance(ty)) =
                                 ty.get_export(engine, instance)
@@ -484,12 +681,7 @@ async fn main() -> wasmtime::Result<()> {
                                 .expect("export not found");
                             (func, ty)
                         };
-                        let mut params = vec![Val::Bool(false); ty.params().len()];
-                        for ((_, ty), v) in zip(func.params(&store), &mut params) {
-                            deserialize(&mut store, de, codec, ty, v)
-                                .await
-                                .context("failed to deserialize param")?;
-                        }
+                        let params = deserialize_params(&mut store, codec, &ty, body).await?;
                         let mut results = vec![Val::Bool(false); ty.results().len()];
                         func.call_async(&mut store, &params, &mut results)
                             .await

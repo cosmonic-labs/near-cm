@@ -29,6 +29,7 @@ interface deserializer {
     resource deserializer {
         from-list: static func(buf: list<u8>) -> deserializer;
 
+        deserialize-bool: static func(this: deserializer) -> result<bool, error>;
         deserialize-u8: static func(this: deserializer) -> result<u8, error>;
         deserialize-s8: static func(this: deserializer) -> result<s8, error>;
         deserialize-u16: static func(this: deserializer) -> result<u16, error>;

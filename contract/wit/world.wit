@@ -6,6 +6,8 @@ interface custom {
         bar: string,
     }
 
+    greet: func(s: string) -> string;
+    add: func(a: u64, b: u64) -> u64;
     foo: func(t: test-record) -> u64;
 }
 
