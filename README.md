@@ -12,7 +12,9 @@ $ curl localhost:8080 -H "X-Contract: contract"
 ```
 
 > myapp:app/custom@0.1.0#greet: func(s: string) -> string
+>
 > myapp:app/custom@0.1.0#add: func(a: u64, b: u64) -> u64
+>
 > myapp:app/custom@0.1.0#foo: func(t: record{foo: string, bar: string}) -> u64
 
 ### Invocation
