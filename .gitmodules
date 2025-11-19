@@ -1,0 +1,3 @@
+[submodule "wasm-serde"]
+	path = wasm-serde
+	url = https://github.com/rvolosatovs/wasm-serde.git
