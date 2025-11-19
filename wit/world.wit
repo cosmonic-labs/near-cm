@@ -13,17 +13,8 @@ interface deserializer {
         next: static func(this: record-deserializer) -> tuple<u32, deserializer, record-deserializer>;
     }
 
-    resource sized-list-deserializer {
-        next: static func(this: sized-list-deserializer) -> tuple<deserializer, sized-list-deserializer>;
-    }
-
-    resource unsized-list-deserializer {
-        next: static func(this: unsized-list-deserializer) -> option<tuple<deserializer, unsized-list-deserializer>>;
-    }
-
-    variant list-deserializer {
-        sized(sized-list-deserializer),
-        unsized(unsized-list-deserializer),
+    resource list-deserializer {
+        next: static func(this: list-deserializer) -> option<tuple<deserializer, list-deserializer>>;
     }
 
     resource deserializer {
@@ -49,7 +40,7 @@ interface deserializer {
         deserialize-tuple: static func(this: deserializer, n: u32) -> result<tuple<deserializer, tuple-deserializer>, error>;
         deserialize-flags: static func(this: deserializer, cases: list<string>) -> result<u32, error>;
         deserialize-enum: static func(this: deserializer, cases: list<string>) -> result<u32, error>;
-        deserialize-option: static func(this: deserializer, payload: bool) -> result<option<deserializer>, error>;
+        deserialize-option: static func(this: deserializer) -> result<option<deserializer>, error>;
         deserialize-result: static func(this: deserializer, ok: bool, err: bool) -> result<result<deserializer, deserializer>, error>;
     }
 }
