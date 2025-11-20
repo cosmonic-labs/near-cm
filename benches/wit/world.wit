@@ -1,0 +1,15 @@
+package near-cm:bench;
+
+world component {
+    import rvolosatovs:serde/deserializer@0.1.0;
+
+    import input: func() -> list<u8>;
+
+    export noop: func();
+
+    export run-small: func();
+    export run-big: func();
+
+    export run-small-bytes: func(input: list<u8>);
+    export run-big-bytes: func(input: list<u8>);
+}
