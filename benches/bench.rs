@@ -1,3 +1,4 @@
+use core::ops::{Deref, DerefMut};
 use std::ffi::OsStr;
 use std::fs;
 use std::path::PathBuf;
@@ -6,7 +7,7 @@ use std::rc::Rc;
 
 use anyhow::Context as _;
 use criterion::measurement::Measurement;
-use criterion::{BenchmarkGroup, Criterion};
+use criterion::{BatchSize, BenchmarkGroup, Criterion};
 use wac_graph::types::Package;
 use wac_graph::{CompositionGraph, EncodeOptions};
 use wasmtime::component::{Component, HasSelf, Resource, ResourceTable};
@@ -41,17 +42,394 @@ const BIG_INPUT: &[u8] = br#"{
   ]
 }"#;
 
+mod bindings {
+    wasmtime::component::bindgen!({
+        path: "benches/wit",
+        with: {
+            "rvolosatovs:serde/deserializer@0.1.0/deserializer": wasmtime::component::ResourceAny,
+            "rvolosatovs:serde/deserializer@0.1.0/error": wasmtime::component::ResourceAny,
+            "rvolosatovs:serde/deserializer@0.1.0/list-deserializer": wasmtime::component::ResourceAny,
+            "rvolosatovs:serde/deserializer@0.1.0/record-deserializer": wasmtime::component::ResourceAny,
+            "rvolosatovs:serde/deserializer@0.1.0/tuple-deserializer": wasmtime::component::ResourceAny,
+        }
+    });
+}
+
+mod codec_bindings {
+    wasmtime::component::bindgen!({
+        path: "benches/wit",
+        inline: "
+                package near-cm:codec;
+
+                world component {
+                    export rvolosatovs:serde/deserializer@0.1.0;
+                }
+",
+    });
+}
+
+use bindings::rvolosatovs::serde::deserializer::{
+    Deserializer, Error, ListDeserializer, RecordDeserializer, TupleDeserializer,
+};
+
+struct Ctx<T> {
+    input: Rc<[u8]>,
+    state: T,
+}
+
+impl<T> Deref for Ctx<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.state
+    }
+}
+
+impl<T> DerefMut for Ctx<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.state
+    }
+}
+
+struct ModuleState {
+    memory: ModuleExport,
+}
+
+struct RuntimeCompositionState {
+    table: ResourceTable,
+    codec: codec_bindings::Component,
+    codec_store: Store<()>,
+}
+
+impl<T> bindings::ComponentImports for Ctx<T> {
+    fn input(&mut self) -> Vec<u8> {
+        self.input.to_vec()
+    }
+}
+
+impl bindings::rvolosatovs::serde::deserializer::HostError for Ctx<RuntimeCompositionState> {
+    fn to_string(&mut self, err: Resource<Error>) -> String {
+        let RuntimeCompositionState {
+            table,
+            codec,
+            codec_store,
+        } = &mut self.state;
+        let err = table.delete(err).unwrap();
+        codec
+            .rvolosatovs_serde_deserializer()
+            .error()
+            .call_to_string(codec_store, err)
+            .unwrap()
+    }
+
+    fn drop(&mut self, err: Resource<Error>) -> wasmtime::Result<()> {
+        self.table.delete(err)?;
+        Ok(())
+    }
+}
+#[expect(unused)]
+impl bindings::rvolosatovs::serde::deserializer::HostDeserializer for Ctx<RuntimeCompositionState> {
+    fn from_list(&mut self, buf: Vec<u8>) -> Resource<Deserializer> {
+        let RuntimeCompositionState {
+            table,
+            codec,
+            codec_store,
+        } = &mut self.state;
+        let de = codec
+            .rvolosatovs_serde_deserializer()
+            .deserializer()
+            .call_from_list(codec_store, &buf)
+            .unwrap();
+        table.push(de).unwrap()
+    }
+
+    fn deserialize_bool(&mut self, de: Resource<Deserializer>) -> Result<bool, Resource<Error>> {
+        todo!()
+    }
+
+    fn deserialize_u8(&mut self, de: Resource<Deserializer>) -> Result<u8, Resource<Error>> {
+        todo!()
+    }
+
+    fn deserialize_s8(&mut self, de: Resource<Deserializer>) -> Result<i8, Resource<Error>> {
+        todo!()
+    }
+
+    fn deserialize_u16(&mut self, de: Resource<Deserializer>) -> Result<u16, Resource<Error>> {
+        todo!()
+    }
+
+    fn deserialize_s16(&mut self, de: Resource<Deserializer>) -> Result<i16, Resource<Error>> {
+        todo!()
+    }
+
+    fn deserialize_u32(&mut self, de: Resource<Deserializer>) -> Result<u32, Resource<Error>> {
+        let RuntimeCompositionState {
+            table,
+            codec,
+            codec_store,
+        } = &mut self.state;
+        let de = table.delete(de).unwrap();
+        let v = codec
+            .rvolosatovs_serde_deserializer()
+            .deserializer()
+            .call_deserialize_u32(codec_store, de)
+            .unwrap()
+            .unwrap();
+        Ok(v)
+    }
+
+    fn deserialize_s32(&mut self, de: Resource<Deserializer>) -> Result<i32, Resource<Error>> {
+        todo!()
+    }
+
+    fn deserialize_u64(&mut self, de: Resource<Deserializer>) -> Result<u64, Resource<Error>> {
+        todo!()
+    }
+
+    fn deserialize_s64(&mut self, de: Resource<Deserializer>) -> Result<i64, Resource<Error>> {
+        todo!()
+    }
+
+    fn deserialize_f32(&mut self, de: Resource<Deserializer>) -> Result<f32, Resource<Error>> {
+        todo!()
+    }
+
+    fn deserialize_f64(&mut self, de: Resource<Deserializer>) -> Result<f64, Resource<Error>> {
+        todo!()
+    }
+
+    fn deserialize_char(&mut self, de: Resource<Deserializer>) -> Result<char, Resource<Error>> {
+        todo!()
+    }
+
+    fn deserialize_bytes(
+        &mut self,
+        de: Resource<Deserializer>,
+    ) -> Result<Vec<u8>, Resource<Error>> {
+        todo!()
+    }
+
+    fn deserialize_string(
+        &mut self,
+        de: Resource<Deserializer>,
+    ) -> Result<String, Resource<Error>> {
+        let RuntimeCompositionState {
+            table,
+            codec,
+            codec_store,
+        } = &mut self.state;
+        let de = table.delete(de).unwrap();
+        let v = codec
+            .rvolosatovs_serde_deserializer()
+            .deserializer()
+            .call_deserialize_string(codec_store, de)
+            .unwrap()
+            .unwrap();
+        Ok(v)
+    }
+
+    fn deserialize_record(
+        &mut self,
+        de: Resource<Deserializer>,
+        fields: Vec<String>,
+    ) -> Result<(u32, Resource<Deserializer>, Resource<RecordDeserializer>), Resource<Error>> {
+        let RuntimeCompositionState {
+            table,
+            codec,
+            codec_store,
+        } = &mut self.state;
+        let de = table.delete(de).unwrap();
+        let (idx, de, next) = codec
+            .rvolosatovs_serde_deserializer()
+            .deserializer()
+            .call_deserialize_record(codec_store, de, &fields)
+            .unwrap()
+            .unwrap();
+        let de = table.push(de).unwrap();
+        let next = table.push(next).unwrap();
+        Ok((idx, de, next))
+    }
+
+    fn deserialize_variant(
+        &mut self,
+        de: Resource<Deserializer>,
+        cases: Vec<(String, bool)>,
+    ) -> Result<(u32, Resource<Deserializer>), Resource<Error>> {
+        todo!()
+    }
+
+    fn deserialize_list(
+        &mut self,
+        de: Resource<Deserializer>,
+    ) -> Result<Resource<ListDeserializer>, Resource<Error>> {
+        let RuntimeCompositionState {
+            table,
+            codec,
+            codec_store,
+        } = &mut self.state;
+        let de = table.delete(de).unwrap();
+        let de = codec
+            .rvolosatovs_serde_deserializer()
+            .deserializer()
+            .call_deserialize_list(codec_store, de)
+            .unwrap()
+            .unwrap();
+        let de = table.push(de).unwrap();
+        Ok(de)
+    }
+
+    fn deserialize_tuple(
+        &mut self,
+        de: Resource<Deserializer>,
+        n: u32,
+    ) -> Result<(Resource<Deserializer>, Resource<TupleDeserializer>), Resource<Error>> {
+        let RuntimeCompositionState {
+            table,
+            codec,
+            codec_store,
+        } = &mut self.state;
+        let de = table.delete(de).unwrap();
+        let (de, next) = codec
+            .rvolosatovs_serde_deserializer()
+            .deserializer()
+            .call_deserialize_tuple(codec_store, de, n)
+            .unwrap()
+            .unwrap();
+        let de = table.push(de).unwrap();
+        let next = table.push(next).unwrap();
+        Ok((de, next))
+    }
+
+    fn deserialize_flags(
+        &mut self,
+        de: Resource<Deserializer>,
+        cases: Vec<String>,
+    ) -> Result<u32, Resource<Error>> {
+        todo!()
+    }
+
+    fn deserialize_enum(
+        &mut self,
+        de: Resource<Deserializer>,
+        cases: Vec<String>,
+    ) -> Result<u32, Resource<Error>> {
+        todo!()
+    }
+
+    fn deserialize_option(
+        &mut self,
+        de: Resource<Deserializer>,
+    ) -> Result<Option<Resource<Deserializer>>, Resource<Error>> {
+        todo!()
+    }
+
+    fn deserialize_result(
+        &mut self,
+        de: Resource<Deserializer>,
+        ok: bool,
+        err: bool,
+    ) -> Result<Result<Resource<Deserializer>, Resource<Deserializer>>, Resource<Error>> {
+        todo!()
+    }
+
+    fn drop(&mut self, de: Resource<Deserializer>) -> wasmtime::Result<()> {
+        self.table.delete(de)?;
+        Ok(())
+    }
+}
+impl bindings::rvolosatovs::serde::deserializer::HostTupleDeserializer
+    for Ctx<RuntimeCompositionState>
+{
+    fn next(
+        &mut self,
+        de: Resource<TupleDeserializer>,
+    ) -> (Resource<Deserializer>, Resource<TupleDeserializer>) {
+        let RuntimeCompositionState {
+            table,
+            codec,
+            codec_store,
+        } = &mut self.state;
+        let de = table.delete(de).unwrap();
+        let (de, next) = codec
+            .rvolosatovs_serde_deserializer()
+            .tuple_deserializer()
+            .call_next(codec_store, de)
+            .unwrap();
+        let de = table.push(de).unwrap();
+        let next = table.push(next).unwrap();
+        (de, next)
+    }
+
+    fn drop(&mut self, de: Resource<TupleDeserializer>) -> wasmtime::Result<()> {
+        self.table.delete(de)?;
+        Ok(())
+    }
+}
+impl bindings::rvolosatovs::serde::deserializer::HostRecordDeserializer
+    for Ctx<RuntimeCompositionState>
+{
+    fn next(
+        &mut self,
+        de: Resource<RecordDeserializer>,
+    ) -> (u32, Resource<Deserializer>, Resource<RecordDeserializer>) {
+        let RuntimeCompositionState {
+            table,
+            codec,
+            codec_store,
+        } = &mut self.state;
+        let de = table.delete(de).unwrap();
+        let (idx, de, next) = codec
+            .rvolosatovs_serde_deserializer()
+            .record_deserializer()
+            .call_next(codec_store, de)
+            .unwrap();
+        let de = table.push(de).unwrap();
+        let next = table.push(next).unwrap();
+        (idx, de, next)
+    }
+
+    fn drop(&mut self, de: Resource<RecordDeserializer>) -> wasmtime::Result<()> {
+        self.table.delete(de)?;
+        Ok(())
+    }
+}
+impl bindings::rvolosatovs::serde::deserializer::HostListDeserializer
+    for Ctx<RuntimeCompositionState>
+{
+    fn next(
+        &mut self,
+        de: Resource<ListDeserializer>,
+    ) -> Option<(Resource<Deserializer>, Resource<ListDeserializer>)> {
+        let RuntimeCompositionState {
+            table,
+            codec,
+            codec_store,
+        } = &mut self.state;
+        let de = table.delete(de).unwrap();
+        let (de, next) = codec
+            .rvolosatovs_serde_deserializer()
+            .list_deserializer()
+            .call_next(codec_store, de)
+            .unwrap()?;
+        let de = table.push(de).unwrap();
+        let next = table.push(next).unwrap();
+        Some((de, next))
+    }
+
+    fn drop(&mut self, de: Resource<ListDeserializer>) -> wasmtime::Result<()> {
+        self.table.delete(de)?;
+        Ok(())
+    }
+}
+impl bindings::rvolosatovs::serde::deserializer::Host for Ctx<RuntimeCompositionState> {}
+
 fn bench_module(
     g: &mut BenchmarkGroup<impl Measurement>,
     wasm: &[u8],
     config: &wasmtime::Config,
 ) -> anyhow::Result<()> {
-    struct Ctx {
-        input: Rc<[u8]>,
-        memory: ModuleExport,
-    }
-
-    fn input(mut caller: Caller<'_, Ctx>, ptr: u64) {
+    fn input(mut caller: Caller<'_, Ctx<ModuleState>>, ptr: u64) {
         let memory = caller.data().memory;
         let Some(Extern::Memory(memory)) = caller.get_module_export(&memory) else {
             panic!()
@@ -61,7 +439,7 @@ fn bench_module(
         memory[ptr..ptr + input.len()].copy_from_slice(&input)
     }
 
-    fn input_len(caller: Caller<'_, Ctx>) -> u64 {
+    fn input_len(caller: Caller<'_, Ctx<ModuleState>>) -> u64 {
         caller.data().input.len() as _
     }
 
@@ -75,46 +453,43 @@ fn bench_module(
     let run_small = module.get_export_index("run_small").unwrap();
     let run_big = module.get_export_index("run_big").unwrap();
     let pre = linker.instantiate_pre(&module)?;
+
+    let setup = |export, input| {
+        let mut store = Store::new(
+            &engine,
+            Ctx {
+                input,
+                state: ModuleState { memory },
+            },
+        );
+        let instance = pre.instantiate(&mut store).unwrap();
+        let Some(Extern::Func(f)) = instance.get_module_export(&mut store, export) else {
+            panic!();
+        };
+        let f = f.typed::<(), ()>(&store).unwrap();
+        (f, store)
+    };
+
     g.bench_function("noop", |b| {
-        b.iter_with_large_drop(|| {
-            let mut store = Store::new(
-                &engine,
-                Ctx {
-                    input: Rc::default(),
-                    memory,
-                },
-            );
-            let instance = pre.instantiate(&mut store).unwrap();
-            let Some(Extern::Func(f)) = instance.get_module_export(&mut store, &noop) else {
-                panic!();
-            };
-            let f = f.typed::<(), ()>(&store).unwrap();
-            f.call(store, ())
-        });
+        b.iter_batched(
+            || setup(&noop, Rc::default()),
+            |(f, store)| f.call(store, ()),
+            BatchSize::SmallInput,
+        )
     });
     g.bench_with_input("small input", &Rc::from(SMALL_INPUT), |b, input| {
-        b.iter_with_large_drop(|| {
-            let input = Rc::clone(input);
-            let mut store = Store::new(&engine, Ctx { input, memory });
-            let instance = pre.instantiate(&mut store).unwrap();
-            let Some(Extern::Func(f)) = instance.get_module_export(&mut store, &run_small) else {
-                panic!();
-            };
-            let f = f.typed::<(), ()>(&store).unwrap();
-            f.call(store, ())
-        });
+        b.iter_batched(
+            || setup(&run_small, Rc::clone(input)),
+            |(f, store)| f.call(store, ()),
+            BatchSize::SmallInput,
+        )
     });
     g.bench_with_input("big input", &Rc::from(BIG_INPUT), |b, input| {
-        b.iter_with_large_drop(|| {
-            let input = Rc::clone(input);
-            let mut store = Store::new(&engine, Ctx { input, memory });
-            let instance = pre.instantiate(&mut store).unwrap();
-            let Some(Extern::Func(f)) = instance.get_module_export(&mut store, &run_big) else {
-                panic!();
-            };
-            let f = f.typed::<(), ()>(&store).unwrap();
-            f.call(store, ())
-        });
+        b.iter_batched(
+            || setup(&run_big, Rc::clone(input)),
+            |(f, store)| f.call(store, ()),
+            BatchSize::SmallInput,
+        )
     });
     Ok(())
 }
@@ -125,328 +500,6 @@ fn bench_component(
     codec: &[u8],
     config: &wasmtime::Config,
 ) -> anyhow::Result<()> {
-    mod bindings {
-        wasmtime::component::bindgen!({
-            path: "benches/wit",
-            with: {
-                "rvolosatovs:serde/deserializer@0.1.0/deserializer": wasmtime::component::ResourceAny,
-                "rvolosatovs:serde/deserializer@0.1.0/error": wasmtime::component::ResourceAny,
-                "rvolosatovs:serde/deserializer@0.1.0/list-deserializer": wasmtime::component::ResourceAny,
-                "rvolosatovs:serde/deserializer@0.1.0/record-deserializer": wasmtime::component::ResourceAny,
-                "rvolosatovs:serde/deserializer@0.1.0/tuple-deserializer": wasmtime::component::ResourceAny,
-            }
-        });
-    }
-
-    mod codec_bindings {
-        wasmtime::component::bindgen!({
-            path: "benches/wit",
-            inline: "
-                package near-cm:codec;
-
-                world component {
-                    export rvolosatovs:serde/deserializer@0.1.0;
-                }
-",
-        });
-    }
-
-    use bindings::rvolosatovs::serde::deserializer::{
-        Deserializer, Error, ListDeserializer, RecordDeserializer, TupleDeserializer,
-    };
-
-    struct Ctx {
-        input: Rc<[u8]>,
-        table: ResourceTable,
-        codec: codec_bindings::Component,
-        codec_store: Store<()>,
-    }
-
-    impl bindings::ComponentImports for Ctx {
-        fn input(&mut self) -> Vec<u8> {
-            self.input.to_vec()
-        }
-    }
-
-    impl bindings::rvolosatovs::serde::deserializer::HostError for Ctx {
-        fn to_string(&mut self, err: Resource<Error>) -> String {
-            let err = self.table.delete(err).unwrap();
-            self.codec
-                .rvolosatovs_serde_deserializer()
-                .error()
-                .call_to_string(&mut self.codec_store, err)
-                .unwrap()
-        }
-
-        fn drop(&mut self, err: Resource<Error>) -> wasmtime::Result<()> {
-            self.table.delete(err)?;
-            Ok(())
-        }
-    }
-    #[expect(unused)]
-    impl bindings::rvolosatovs::serde::deserializer::HostDeserializer for Ctx {
-        fn from_list(&mut self, buf: Vec<u8>) -> Resource<Deserializer> {
-            let de = self
-                .codec
-                .rvolosatovs_serde_deserializer()
-                .deserializer()
-                .call_from_list(&mut self.codec_store, &buf)
-                .unwrap();
-            self.table.push(de).unwrap()
-        }
-
-        fn deserialize_bool(
-            &mut self,
-            de: Resource<Deserializer>,
-        ) -> Result<bool, Resource<Error>> {
-            todo!()
-        }
-
-        fn deserialize_u8(&mut self, de: Resource<Deserializer>) -> Result<u8, Resource<Error>> {
-            todo!()
-        }
-
-        fn deserialize_s8(&mut self, de: Resource<Deserializer>) -> Result<i8, Resource<Error>> {
-            todo!()
-        }
-
-        fn deserialize_u16(&mut self, de: Resource<Deserializer>) -> Result<u16, Resource<Error>> {
-            todo!()
-        }
-
-        fn deserialize_s16(&mut self, de: Resource<Deserializer>) -> Result<i16, Resource<Error>> {
-            todo!()
-        }
-
-        fn deserialize_u32(&mut self, de: Resource<Deserializer>) -> Result<u32, Resource<Error>> {
-            let de = self.table.delete(de).unwrap();
-            let v = self
-                .codec
-                .rvolosatovs_serde_deserializer()
-                .deserializer()
-                .call_deserialize_u32(&mut self.codec_store, de)
-                .unwrap()
-                .unwrap();
-            Ok(v)
-        }
-
-        fn deserialize_s32(&mut self, de: Resource<Deserializer>) -> Result<i32, Resource<Error>> {
-            todo!()
-        }
-
-        fn deserialize_u64(&mut self, de: Resource<Deserializer>) -> Result<u64, Resource<Error>> {
-            todo!()
-        }
-
-        fn deserialize_s64(&mut self, de: Resource<Deserializer>) -> Result<i64, Resource<Error>> {
-            todo!()
-        }
-
-        fn deserialize_f32(&mut self, de: Resource<Deserializer>) -> Result<f32, Resource<Error>> {
-            todo!()
-        }
-
-        fn deserialize_f64(&mut self, de: Resource<Deserializer>) -> Result<f64, Resource<Error>> {
-            todo!()
-        }
-
-        fn deserialize_char(
-            &mut self,
-            de: Resource<Deserializer>,
-        ) -> Result<char, Resource<Error>> {
-            todo!()
-        }
-
-        fn deserialize_bytes(
-            &mut self,
-            de: Resource<Deserializer>,
-        ) -> Result<Vec<u8>, Resource<Error>> {
-            todo!()
-        }
-
-        fn deserialize_string(
-            &mut self,
-            de: Resource<Deserializer>,
-        ) -> Result<String, Resource<Error>> {
-            let de = self.table.delete(de).unwrap();
-            let v = self
-                .codec
-                .rvolosatovs_serde_deserializer()
-                .deserializer()
-                .call_deserialize_string(&mut self.codec_store, de)
-                .unwrap()
-                .unwrap();
-            Ok(v)
-        }
-
-        fn deserialize_record(
-            &mut self,
-            de: Resource<Deserializer>,
-            fields: Vec<String>,
-        ) -> Result<(u32, Resource<Deserializer>, Resource<RecordDeserializer>), Resource<Error>>
-        {
-            let de = self.table.delete(de).unwrap();
-            let (idx, de, next) = self
-                .codec
-                .rvolosatovs_serde_deserializer()
-                .deserializer()
-                .call_deserialize_record(&mut self.codec_store, de, &fields)
-                .unwrap()
-                .unwrap();
-            let de = self.table.push(de).unwrap();
-            let next = self.table.push(next).unwrap();
-            Ok((idx, de, next))
-        }
-
-        fn deserialize_variant(
-            &mut self,
-            de: Resource<Deserializer>,
-            cases: Vec<(String, bool)>,
-        ) -> Result<(u32, Resource<Deserializer>), Resource<Error>> {
-            todo!()
-        }
-
-        fn deserialize_list(
-            &mut self,
-            de: Resource<Deserializer>,
-        ) -> Result<Resource<ListDeserializer>, Resource<Error>> {
-            let de = self.table.delete(de).unwrap();
-            let de = self
-                .codec
-                .rvolosatovs_serde_deserializer()
-                .deserializer()
-                .call_deserialize_list(&mut self.codec_store, de)
-                .unwrap()
-                .unwrap();
-            let de = self.table.push(de).unwrap();
-            Ok(de)
-        }
-
-        fn deserialize_tuple(
-            &mut self,
-            de: Resource<Deserializer>,
-            n: u32,
-        ) -> Result<(Resource<Deserializer>, Resource<TupleDeserializer>), Resource<Error>>
-        {
-            let de = self.table.delete(de).unwrap();
-            let (de, next) = self
-                .codec
-                .rvolosatovs_serde_deserializer()
-                .deserializer()
-                .call_deserialize_tuple(&mut self.codec_store, de, n)
-                .unwrap()
-                .unwrap();
-            let de = self.table.push(de).unwrap();
-            let next = self.table.push(next).unwrap();
-            Ok((de, next))
-        }
-
-        fn deserialize_flags(
-            &mut self,
-            de: Resource<Deserializer>,
-            cases: Vec<String>,
-        ) -> Result<u32, Resource<Error>> {
-            todo!()
-        }
-
-        fn deserialize_enum(
-            &mut self,
-            de: Resource<Deserializer>,
-            cases: Vec<String>,
-        ) -> Result<u32, Resource<Error>> {
-            todo!()
-        }
-
-        fn deserialize_option(
-            &mut self,
-            de: Resource<Deserializer>,
-        ) -> Result<Option<Resource<Deserializer>>, Resource<Error>> {
-            todo!()
-        }
-
-        fn deserialize_result(
-            &mut self,
-            de: Resource<Deserializer>,
-            ok: bool,
-            err: bool,
-        ) -> Result<Result<Resource<Deserializer>, Resource<Deserializer>>, Resource<Error>>
-        {
-            todo!()
-        }
-
-        fn drop(&mut self, de: Resource<Deserializer>) -> wasmtime::Result<()> {
-            self.table.delete(de)?;
-            Ok(())
-        }
-    }
-    impl bindings::rvolosatovs::serde::deserializer::HostTupleDeserializer for Ctx {
-        fn next(
-            &mut self,
-            de: Resource<TupleDeserializer>,
-        ) -> (Resource<Deserializer>, Resource<TupleDeserializer>) {
-            let de = self.table.delete(de).unwrap();
-            let (de, next) = self
-                .codec
-                .rvolosatovs_serde_deserializer()
-                .tuple_deserializer()
-                .call_next(&mut self.codec_store, de)
-                .unwrap();
-            let de = self.table.push(de).unwrap();
-            let next = self.table.push(next).unwrap();
-            (de, next)
-        }
-
-        fn drop(&mut self, de: Resource<TupleDeserializer>) -> wasmtime::Result<()> {
-            self.table.delete(de)?;
-            Ok(())
-        }
-    }
-    impl bindings::rvolosatovs::serde::deserializer::HostRecordDeserializer for Ctx {
-        fn next(
-            &mut self,
-            de: Resource<RecordDeserializer>,
-        ) -> (u32, Resource<Deserializer>, Resource<RecordDeserializer>) {
-            let de = self.table.delete(de).unwrap();
-            let (idx, de, next) = self
-                .codec
-                .rvolosatovs_serde_deserializer()
-                .record_deserializer()
-                .call_next(&mut self.codec_store, de)
-                .unwrap();
-            let de = self.table.push(de).unwrap();
-            let next = self.table.push(next).unwrap();
-            (idx, de, next)
-        }
-
-        fn drop(&mut self, de: Resource<RecordDeserializer>) -> wasmtime::Result<()> {
-            self.table.delete(de)?;
-            Ok(())
-        }
-    }
-    impl bindings::rvolosatovs::serde::deserializer::HostListDeserializer for Ctx {
-        fn next(
-            &mut self,
-            de: Resource<ListDeserializer>,
-        ) -> Option<(Resource<Deserializer>, Resource<ListDeserializer>)> {
-            let de = self.table.delete(de).unwrap();
-            let (de, next) = self
-                .codec
-                .rvolosatovs_serde_deserializer()
-                .list_deserializer()
-                .call_next(&mut self.codec_store, de)
-                .unwrap()?;
-            let de = self.table.push(de).unwrap();
-            let next = self.table.push(next).unwrap();
-            Some((de, next))
-        }
-
-        fn drop(&mut self, de: Resource<ListDeserializer>) -> wasmtime::Result<()> {
-            self.table.delete(de)?;
-            Ok(())
-        }
-    }
-    impl bindings::rvolosatovs::serde::deserializer::Host for Ctx {}
-
     let engine = Engine::new(config)?;
 
     let codec = Component::new(&engine, codec)?;
@@ -456,99 +509,79 @@ fn bench_component(
 
     let runner = Component::new(&engine, runner)?;
     let mut linker = component::Linker::new(&engine);
-    bindings::Component::add_to_linker::<_, HasSelf<Ctx>>(&mut linker, |cx| cx)?;
+    bindings::Component::add_to_linker::<_, HasSelf<Ctx<RuntimeCompositionState>>>(
+        &mut linker,
+        |cx| cx,
+    )?;
     let runner_pre = linker.instantiate_pre(&runner)?;
     let runner_pre = bindings::ComponentPre::new(runner_pre)?;
-    g.bench_function("noop", |b| {
-        b.iter_with_large_drop(|| {
-            let mut codec_store = Store::new(&engine, ());
-            let codec = codec_pre.instantiate(&mut codec_store).unwrap();
-            let mut store = Store::new(
-                &engine,
-                Ctx {
-                    input: Rc::default(),
+
+    let setup = |input| {
+        let mut codec_store = Store::new(&engine, ());
+        let codec = codec_pre.instantiate(&mut codec_store).unwrap();
+        let mut store = Store::new(
+            &engine,
+            Ctx {
+                input,
+                state: RuntimeCompositionState {
                     table: ResourceTable::default(),
                     codec,
                     codec_store,
                 },
-            );
-            let runner = runner_pre.instantiate(&mut store).unwrap();
-            runner.call_noop(store).unwrap();
-        });
+            },
+        );
+        let runner = runner_pre.instantiate(&mut store).unwrap();
+        (runner, store)
+    };
+
+    g.bench_function("noop", |b| {
+        b.iter_batched(
+            || setup(Rc::default()),
+            |(runner, store)| {
+                runner.call_noop(store).unwrap();
+            },
+            BatchSize::SmallInput,
+        );
     });
     g.bench_with_input("small input", &Rc::from(SMALL_INPUT), |b, input| {
-        b.iter_with_large_drop(|| {
-            let mut codec_store = Store::new(&engine, ());
-            let codec = codec_pre.instantiate(&mut codec_store).unwrap();
-            let input = Rc::clone(input);
-            let mut store = Store::new(
-                &engine,
-                Ctx {
-                    input,
-                    table: ResourceTable::default(),
-                    codec,
-                    codec_store,
-                },
-            );
-            let runner = runner_pre.instantiate(&mut store).unwrap();
-            runner.call_run_small(store).unwrap();
-        });
+        b.iter_batched(
+            || setup(Rc::clone(input)),
+            |(runner, store)| {
+                runner.call_run_small(store).unwrap();
+            },
+            BatchSize::SmallInput,
+        );
     });
     g.bench_with_input(
         "small input byte args",
         &Rc::from(SMALL_INPUT),
         |b, input| {
-            b.iter_with_large_drop(|| {
-                let mut codec_store = Store::new(&engine, ());
-                let codec = codec_pre.instantiate(&mut codec_store).unwrap();
-                let mut store = Store::new(
-                    &engine,
-                    Ctx {
-                        input: Rc::default(),
-                        table: ResourceTable::default(),
-                        codec,
-                        codec_store,
-                    },
-                );
-                let instance = runner_pre.instantiate(&mut store).unwrap();
-                instance.call_run_small_bytes(store, input).unwrap();
-            });
+            b.iter_batched(
+                || setup(Rc::default()),
+                |(runner, store)| {
+                    runner.call_run_small_bytes(store, input).unwrap();
+                },
+                BatchSize::SmallInput,
+            );
         },
     );
     g.bench_with_input("big input", &Rc::from(BIG_INPUT), |b, input| {
-        b.iter_with_large_drop(|| {
-            let mut codec_store = Store::new(&engine, ());
-            let codec = codec_pre.instantiate(&mut codec_store).unwrap();
-            let input = Rc::clone(input);
-            let mut store = Store::new(
-                &engine,
-                Ctx {
-                    input,
-                    table: ResourceTable::default(),
-                    codec,
-                    codec_store,
-                },
-            );
-            let runner = runner_pre.instantiate(&mut store).unwrap();
-            runner.call_run_big(store).unwrap();
-        });
+        b.iter_batched(
+            || setup(Rc::clone(input)),
+            |(runner, store)| {
+                runner.call_run_big(store).unwrap();
+            },
+            BatchSize::SmallInput,
+        );
     });
     g.bench_with_input("big input byte args", &Rc::from(BIG_INPUT), |b, input| {
-        b.iter_with_large_drop(|| {
-            let mut codec_store = Store::new(&engine, ());
-            let codec = codec_pre.instantiate(&mut codec_store).unwrap();
-            let mut store = Store::new(
-                &engine,
-                Ctx {
-                    input: Rc::default(),
-                    table: ResourceTable::default(),
-                    codec,
-                    codec_store,
-                },
-            );
-            let runner = runner_pre.instantiate(&mut store).unwrap();
-            runner.call_run_big_bytes(store, input).unwrap();
-        });
+        b.iter_batched(
+            || setup(Rc::default()),
+            |(runner, store)| {
+                runner.call_run_big_bytes(store, input).unwrap();
+            },
+            BatchSize::SmallInput,
+        );
     });
     Ok(())
 }
@@ -634,7 +667,7 @@ fn new_wasmtime_config(
     // let max_memory_size = guest_memory_size(max_memory_pages).unwrap_or(usize::MAX);
     // let max_tables = MAX_CONCURRENCY.saturating_mul(max_tables_per_contract);
 
-    let pooling_config = wasmtime::PoolingAllocationConfig::default();
+    //let pooling_config = wasmtime::PoolingAllocationConfig::default();
     // pooling_config
     //     .decommit_batch_size(DECOMMIT_BATCH_SIZE)
     //     .max_memory_size(max_memory_size)
@@ -649,9 +682,9 @@ fn new_wasmtime_config(
 
     let mut config = wasmtime::Config::default();
     config
-        .allocation_strategy(wasmtime::InstanceAllocationStrategy::Pooling(
-            pooling_config,
-        ))
+        //.allocation_strategy(wasmtime::InstanceAllocationStrategy::Pooling(
+        //    pooling_config,
+        //))
         // From official documentation:
         // > Note that systems loading many modules may wish to disable this
         // > configuration option instead of leaving it on-by-default.
