@@ -1,3 +1,4 @@
+use bench::bindings::{BigInput, SmallInput};
 use bench::{assert_big_input, assert_small_input, bindings};
 
 struct Component;
@@ -24,6 +25,14 @@ impl bindings::Guest for Component {
 
     fn run_big_bytes(buf: Vec<u8>) {
         let v = serde_json::from_slice(&buf).unwrap();
+        assert_big_input(v)
+    }
+
+    fn run_small_typed(v: SmallInput) {
+        assert_small_input(v)
+    }
+
+    fn run_big_typed(v: BigInput) {
         assert_big_input(v)
     }
 }

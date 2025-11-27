@@ -1,48 +1,19 @@
-use bindings::rvolosatovs::serde::deserializer::{
-    Deserializer, ListDeserializer, RecordDeserializer, TupleDeserializer,
-};
-use serde::Deserialize;
-
 pub mod bindings {
     wit_bindgen::generate!({
         path: "../wit",
         pub_export_macro: true,
         ownership: Borrowing { duplicate_if_necessary: true },
         generate_all,
+        additional_derives: [serde::Deserialize, Eq, PartialEq],
     });
 }
 
-#[derive(Debug, Deserialize, Eq, PartialEq)]
-pub struct SmallInput {
-    pub a: String,
-    pub b: u32,
-    pub c: [u32; 3],
-}
-
-#[derive(Debug, Deserialize, Eq, PartialEq)]
-pub struct BigInputElementPayload {
-    pub nonce: String,
-    pub message: String,
-    pub recipient: String,
-}
-
-#[derive(Debug, Deserialize, Eq, PartialEq)]
-pub struct BigInputElement {
-    pub payload: BigInputElementPayload,
-    pub standard: String,
-    pub signature: String,
-    pub public_key: String,
-}
-
-#[derive(Debug, Deserialize, Eq, PartialEq)]
-pub struct BigInput {
-    pub signed: Vec<BigInputElement>,
-}
+use bindings::{BigInput, SmallInput};
 
 pub fn assert_small_input(SmallInput { a, b, c }: SmallInput) {
     assert_eq!(a, "test");
     assert_eq!(b, 42);
-    assert_eq!(c, [0, 1, 2]);
+    assert_eq!(c, (0, 1, 2));
 }
 
 pub fn assert_big_input(BigInput { signed }: BigInput) {
@@ -86,99 +57,4 @@ pub fn assert_big_input(BigInput { signed }: BigInput) {
         second.public_key,
         "ed25519:ESzYnUQTyVsNpk2u8ZHZ6q2MF8MHsuoKFRC4aqYAvcJD"
     );
-}
-
-pub fn assert_deserialize_small_input(de: Deserializer) {
-    let (idx, a, de) = Deserializer::deserialize_record(de, &["a", "b", "c"]).unwrap();
-    assert_eq!(idx, 0);
-    let a = Deserializer::deserialize_string(a).unwrap();
-
-    let (idx, b, de) = RecordDeserializer::next(de);
-    assert_eq!(idx, 1);
-    let b = Deserializer::deserialize_u32(b).unwrap();
-
-    let (idx, c, _) = RecordDeserializer::next(de);
-    assert_eq!(idx, 2);
-
-    let (c0, c_de) = Deserializer::deserialize_tuple(c, 3).unwrap();
-    let c0 = Deserializer::deserialize_u32(c0).unwrap();
-
-    let (c1, c_de) = TupleDeserializer::next(c_de);
-    let c1 = Deserializer::deserialize_u32(c1).unwrap();
-
-    let (c2, _) = TupleDeserializer::next(c_de);
-    let c2 = Deserializer::deserialize_u32(c2).unwrap();
-
-    assert_small_input(SmallInput {
-        a,
-        b,
-        c: [c0, c1, c2],
-    })
-}
-
-pub fn deserialize_big_input_element_payload(de: Deserializer) -> BigInputElementPayload {
-    let (idx, nonce, de) =
-        Deserializer::deserialize_record(de, &["nonce", "message", "recipient"]).unwrap();
-    assert_eq!(idx, 0);
-    let nonce = Deserializer::deserialize_string(nonce).unwrap();
-
-    let (idx, message, de) = RecordDeserializer::next(de);
-    assert_eq!(idx, 1);
-    let message = Deserializer::deserialize_string(message).unwrap();
-
-    let (idx, recipient, _de) = RecordDeserializer::next(de);
-    assert_eq!(idx, 2);
-    let recipient = Deserializer::deserialize_string(recipient).unwrap();
-
-    BigInputElementPayload {
-        nonce,
-        message,
-        recipient,
-    }
-}
-
-pub fn deserialize_big_input_element(de: Deserializer) -> BigInputElement {
-    let (idx, payload, de) =
-        Deserializer::deserialize_record(de, &["payload", "standard", "signature", "public_key"])
-            .unwrap();
-    assert_eq!(idx, 0);
-    let payload = deserialize_big_input_element_payload(payload);
-
-    let (idx, standard, de) = RecordDeserializer::next(de);
-    assert_eq!(idx, 1);
-    let standard = Deserializer::deserialize_string(standard).unwrap();
-
-    let (idx, signature, de) = RecordDeserializer::next(de);
-    assert_eq!(idx, 2);
-    let signature = Deserializer::deserialize_string(signature).unwrap();
-
-    let (idx, public_key, _) = RecordDeserializer::next(de);
-    assert_eq!(idx, 3);
-    let public_key = Deserializer::deserialize_string(public_key).unwrap();
-
-    BigInputElement {
-        payload,
-        standard,
-        signature,
-        public_key,
-    }
-}
-
-pub fn deserialize_big_input(de: Deserializer) -> BigInput {
-    let (idx, signed, _) = Deserializer::deserialize_record(de, &["signed"]).unwrap();
-    assert_eq!(idx, 0);
-
-    let mut elems = Deserializer::deserialize_list(signed).unwrap();
-    let mut signed = Vec::default();
-    while let Some((de, next)) = ListDeserializer::next(elems) {
-        let el = deserialize_big_input_element(de);
-        signed.push(el);
-        elems = next;
-    }
-    BigInput { signed }
-}
-
-pub fn assert_deserialize_big_input(de: Deserializer) {
-    let v = deserialize_big_input(de);
-    assert_big_input(v);
 }

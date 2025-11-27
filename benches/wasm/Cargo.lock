@@ -36,6 +36,7 @@ name = "component-codec-import"
 version = "0.1.0"
 dependencies = [
  "bench",
+ "wit-bindgen",
 ]
 
 [[package]]

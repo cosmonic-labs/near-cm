@@ -1,7 +1,28 @@
 package near-cm:bench;
 
 world component {
-    import rvolosatovs:serde/deserializer@0.1.0;
+    record small-input {
+       a: string,
+       b: u32,
+       c: tuple<u32, u32, u32>,
+    }
+
+    record big-input-element-payload {
+       nonce: string,
+       message: string,
+       recipient: string,
+    }
+
+    record big-input-element {
+       payload: big-input-element-payload,
+       standard: string,
+       signature: string,
+       public-key: string,
+    }
+
+    record big-input {
+       signed: list<big-input-element>,
+    }
 
     import input: func() -> list<u8>;
 
@@ -12,4 +33,7 @@ world component {
 
     export run-small-bytes: func(input: list<u8>);
     export run-big-bytes: func(input: list<u8>);
+
+    export run-small-typed: func(input: small-input);
+    export run-big-typed: func(input: big-input);
 }

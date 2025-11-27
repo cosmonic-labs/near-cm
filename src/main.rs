@@ -1,5 +1,6 @@
 mod bindings {
     wasmtime::component::bindgen!({
+        world: "format",
         exports: {
             default: async,
         }
@@ -165,7 +166,7 @@ async fn deserialize(
                 .collect::<Vec<_>>();
             match instance
                 .deserializer()
-                .call_deserialize_record(&mut *store, de, &names)
+                .call_deserialize_record(&mut *store, de, todo!())
                 .await?
             {
                 Ok((mut idx, mut de, mut iter)) => {
@@ -226,7 +227,7 @@ async fn deserialize(
             let num_elements = tys.len();
             match instance
                 .deserializer()
-                .call_deserialize_tuple(&mut *store, de, num_elements as _)
+                .call_deserialize_tuple(&mut *store, de, todo!())
                 .await?
             {
                 Ok((mut de, mut iter)) => {
@@ -293,9 +294,10 @@ async fn deserialize_params(
         .call_from_list(&mut *store, &body.to_bytes())
         .await?;
 
+    // TODO: impl
     match instance
         .deserializer()
-        .call_deserialize_tuple(&mut *store, de, num_params as _)
+        .call_deserialize_tuple(&mut *store, de, todo!())
         .await?
     {
         Ok((mut de, mut iter)) => {
