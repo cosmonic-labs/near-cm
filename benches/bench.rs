@@ -250,6 +250,39 @@ fn bench_module(
         caller.data().input.len() as _
     }
 
+    fn make_setup<T: wasmtime::WasmParams>(
+        engine: &Engine,
+        pre: &wasmtime::InstancePre<Ctx<ModuleState>>,
+        memory: ModuleExport,
+    ) -> impl Fn(
+        &ModuleExport,
+        Rc<[u8]>,
+    ) -> (
+        wasmtime::TypedFunc<T, ()>,
+        wasmtime::Memory,
+        Store<Ctx<ModuleState>>,
+    ) {
+        move |export, input| {
+            let mut store = Store::new(
+                &engine,
+                Ctx {
+                    input,
+                    state: ModuleState { memory },
+                },
+            );
+            let instance = pre.instantiate(&mut store).unwrap();
+            let Some(Extern::Func(f)) = instance.get_module_export(&mut store, export) else {
+                panic!();
+            };
+            let Some(Extern::Memory(memory)) = instance.get_module_export(&mut store, &memory)
+            else {
+                panic!();
+            };
+            let f = f.typed(&store).unwrap();
+            (f, memory, store)
+        }
+    }
+
     let engine = Engine::new(config)?;
     let module = Module::new(&engine, wasm)?;
     let mut linker = wasmtime::Linker::new(&engine);
@@ -258,46 +291,64 @@ fn bench_module(
     let memory = module.get_export_index("memory").unwrap();
     let noop = module.get_export_index("noop").unwrap();
     let run_small = module.get_export_index("run_small").unwrap();
+    let run_small_bytes = module.get_export_index("run_small_bytes").unwrap();
     let run_big = module.get_export_index("run_big").unwrap();
+    let run_big_bytes = module.get_export_index("run_big_bytes").unwrap();
     let pre = linker.instantiate_pre(&module)?;
 
-    let setup = |export, input| {
-        let mut store = Store::new(
-            &engine,
-            Ctx {
-                input,
-                state: ModuleState { memory },
-            },
-        );
-        let instance = pre.instantiate(&mut store).unwrap();
-        let Some(Extern::Func(f)) = instance.get_module_export(&mut store, export) else {
-            panic!();
-        };
-        let f = f.typed::<(), ()>(&store).unwrap();
-        (f, store)
-    };
+    let setup = make_setup::<()>(&engine, &pre, memory);
+    let setup_bytes =
+        |export| make_setup::<(u32, u32)>(&engine, &pre, memory)(export, Rc::default());
 
     g.bench_function("noop", |b| {
         b.iter_batched(
             || setup(&noop, Rc::default()),
-            |(f, store)| f.call(store, ()),
+            |(f, _, store)| f.call(store, ()),
             BatchSize::SmallInput,
         )
     });
     g.bench_with_input("small input", &Rc::from(SMALL_INPUT), |b, input| {
         b.iter_batched(
             || setup(&run_small, Rc::clone(input)),
-            |(f, store)| f.call(store, ()),
+            |(f, _, store)| f.call(store, ()),
             BatchSize::SmallInput,
         )
     });
+    g.bench_with_input(
+        "small input byte args",
+        &Rc::<[u8]>::from(SMALL_INPUT),
+        |b, input| {
+            b.iter_batched(
+                || setup_bytes(&run_small_bytes),
+                |(f, memory, mut store)| {
+                    memory.data_mut(&mut store)[..input.len()].copy_from_slice(input);
+                    f.call(store, (0, input.len() as _))
+                },
+                BatchSize::SmallInput,
+            )
+        },
+    );
     g.bench_with_input("big input", &Rc::from(BIG_INPUT), |b, input| {
         b.iter_batched(
             || setup(&run_big, Rc::clone(input)),
-            |(f, store)| f.call(store, ()),
+            |(f, _, store)| f.call(store, ()),
             BatchSize::SmallInput,
         )
     });
+    g.bench_with_input(
+        "big input byte args",
+        &Rc::<[u8]>::from(BIG_INPUT),
+        |b, input| {
+            b.iter_batched(
+                || setup_bytes(&run_big_bytes),
+                |(f, memory, mut store)| {
+                    memory.data_mut(&mut store)[..input.len()].copy_from_slice(input);
+                    f.call(store, (0, input.len() as _))
+                },
+                BatchSize::SmallInput,
+            )
+        },
+    );
     Ok(())
 }
 
