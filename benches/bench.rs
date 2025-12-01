@@ -308,7 +308,7 @@ fn bench_module(
                 let (f, _, store) = setup(&noop, Rc::default());
                 f.call(store, ())
             },
-            BatchSize::SmallInput,
+            BatchSize::LargeInput,
         )
     });
     g.bench_with_input("small input", &Rc::from(SMALL_INPUT), |b, input| {
@@ -318,7 +318,7 @@ fn bench_module(
                 let (f, _, store) = setup(&run_small, input);
                 f.call(store, ())
             },
-            BatchSize::SmallInput,
+            BatchSize::LargeInput,
         )
     });
     g.bench_with_input(
@@ -332,7 +332,7 @@ fn bench_module(
                     memory.data_mut(&mut store)[..input.len()].copy_from_slice(input);
                     f.call(store, (0, input.len() as _))
                 },
-                BatchSize::SmallInput,
+                BatchSize::LargeInput,
             )
         },
     );
@@ -343,7 +343,7 @@ fn bench_module(
                 let (f, _, store) = setup(&run_big, input);
                 f.call(store, ())
             },
-            BatchSize::SmallInput,
+            BatchSize::LargeInput,
         )
     });
     g.bench_with_input(
@@ -357,7 +357,7 @@ fn bench_module(
                     memory.data_mut(&mut store)[..input.len()].copy_from_slice(input);
                     f.call(store, (0, input.len() as _))
                 },
-                BatchSize::SmallInput,
+                BatchSize::LargeInput,
             )
         },
     );
@@ -404,7 +404,7 @@ fn bench_component(
                 let (runner, store) = setup_runner(Rc::default());
                 runner.call_noop(store).unwrap();
             },
-            BatchSize::SmallInput,
+            BatchSize::LargeInput,
         );
     });
     g.bench_with_input("small input", &Rc::from(SMALL_INPUT), |b, input| {
@@ -414,7 +414,7 @@ fn bench_component(
                 let (runner, store) = setup_runner(input);
                 runner.call_run_small(store).unwrap();
             },
-            BatchSize::SmallInput,
+            BatchSize::LargeInput,
         );
     });
     g.bench_with_input(
@@ -427,7 +427,7 @@ fn bench_component(
                     let (runner, store) = setup_runner(Rc::default());
                     runner.call_run_small_bytes(store, input).unwrap();
                 },
-                BatchSize::SmallInput,
+                BatchSize::LargeInput,
             );
         },
     );
@@ -550,7 +550,7 @@ fn bench_component(
                         )
                         .unwrap();
                 },
-                BatchSize::SmallInput,
+                BatchSize::LargeInput,
             );
         },
     );
@@ -565,7 +565,7 @@ fn bench_component(
                 let (runner, store) = setup_runner(Rc::default());
                 runner.call_run_small_typed(store, &input).unwrap();
             },
-            BatchSize::SmallInput,
+            BatchSize::LargeInput,
         );
     });
     g.bench_with_input("big input", &Rc::from(BIG_INPUT), |b, input| {
@@ -575,7 +575,7 @@ fn bench_component(
                 let (runner, store) = setup_runner(input);
                 runner.call_run_big(store).unwrap();
             },
-            BatchSize::SmallInput,
+            BatchSize::LargeInput,
         );
     });
     g.bench_with_input("big input byte args", &Rc::from(BIG_INPUT), |b, input| {
@@ -585,7 +585,7 @@ fn bench_component(
                 let (runner, store) = setup_runner(Rc::default());
                 runner.call_run_big_bytes(store, input).unwrap();
             },
-            BatchSize::SmallInput,
+            BatchSize::LargeInput,
         );
     });
     g.bench_with_input("big input typed args", &Rc::from(BIG_INPUT), |b, input| {
@@ -655,7 +655,7 @@ fn bench_component(
                     .call_run_big_typed(&mut runner_store, &input)
                     .unwrap();
             },
-            BatchSize::SmallInput,
+            BatchSize::LargeInput,
         );
     });
     g.bench_function("big input deserialized typed args", |b| {
@@ -691,7 +691,7 @@ fn bench_component(
                 let (runner, store) = setup_runner(Rc::default());
                 runner.call_run_big_typed(store, &input).unwrap();
             },
-            BatchSize::SmallInput,
+            BatchSize::LargeInput,
         );
     });
     Ok(())
@@ -761,76 +761,76 @@ fn compose(runner: impl Into<Vec<u8>>, codec: impl Into<Vec<u8>>) -> anyhow::Res
 
 // NOTE: This is adapted from current nearcore `main`
 fn new_wasmtime_config(
-    _max_memory_pages: u32,
-    _max_tables_per_contract: u32,
-    _max_elements_per_contract_table: usize,
+    max_memory_pages: u32,
+    max_tables_per_contract: u32,
+    max_elements_per_contract_table: usize,
 ) -> wasmtime::Config {
-    // /// The maximum amount of concurrent calls this engine can handle.
-    // /// If this limit is reached, invocations will block until an execution slot is available.
-    // ///
-    // /// Wasmtime will use this value to pre-allocate and pool resources internally.
-    // /// Wasmtime defaults to `1_000`
-    // const MAX_CONCURRENCY: u32 = 1_000;
+    /// The maximum amount of concurrent calls this engine can handle.
+    /// If this limit is reached, invocations will block until an execution slot is available.
+    ///
+    /// Wasmtime will use this value to pre-allocate and pool resources internally.
+    /// Wasmtime defaults to `1_000`
+    const MAX_CONCURRENCY: u32 = 1_000;
 
-    // /// Value used for [PoolingAllocationConfig::decommit_batch_size]
-    // ///
-    // /// Wasmtime defaults to `1`
-    // const DECOMMIT_BATCH_SIZE: usize = MAX_CONCURRENCY as usize / 2;
+    /// Value used for [PoolingAllocationConfig::decommit_batch_size]
+    ///
+    /// Wasmtime defaults to `1`
+    const DECOMMIT_BATCH_SIZE: usize = MAX_CONCURRENCY as usize / 2;
 
-    // /// Guest page size, in bytes
-    // const GUEST_PAGE_SIZE: usize = 1 << 16;
+    /// Guest page size, in bytes
+    const GUEST_PAGE_SIZE: usize = 1 << 16;
 
-    // fn guest_memory_size(pages: u32) -> Option<usize> {
-    //     let pages = usize::try_from(pages).ok()?;
-    //     pages.checked_mul(GUEST_PAGE_SIZE)
-    // }
+    fn guest_memory_size(pages: u32) -> Option<usize> {
+        let pages = usize::try_from(pages).ok()?;
+        pages.checked_mul(GUEST_PAGE_SIZE)
+    }
 
-    // let max_memory_size = guest_memory_size(max_memory_pages).unwrap_or(usize::MAX);
-    // let max_tables = MAX_CONCURRENCY.saturating_mul(max_tables_per_contract);
+    let max_memory_size = guest_memory_size(max_memory_pages).unwrap_or(usize::MAX);
+    let max_tables = MAX_CONCURRENCY.saturating_mul(max_tables_per_contract);
 
-    //let pooling_config = wasmtime::PoolingAllocationConfig::default();
-    // pooling_config
-    //     .decommit_batch_size(DECOMMIT_BATCH_SIZE)
-    //     .max_memory_size(max_memory_size)
-    //     .table_elements(max_elements_per_contract_table)
-    //     .total_component_instances(MAX_CONCURRENCY)
-    //     .total_core_instances(MAX_CONCURRENCY)
-    //     .total_memories(MAX_CONCURRENCY)
-    //     .total_tables(max_tables)
-    //     .max_memories_per_module(1)
-    //     .max_tables_per_module(max_tables_per_contract)
-    //     .table_keep_resident(max_elements_per_contract_table);
+    let mut pooling_config = wasmtime::PoolingAllocationConfig::default();
+    pooling_config
+        .decommit_batch_size(DECOMMIT_BATCH_SIZE)
+        .max_memory_size(max_memory_size)
+        .table_elements(max_elements_per_contract_table)
+        .total_component_instances(MAX_CONCURRENCY)
+        .total_core_instances(MAX_CONCURRENCY)
+        .total_memories(MAX_CONCURRENCY)
+        .total_tables(max_tables)
+        .max_memories_per_module(1)
+        .max_tables_per_module(max_tables_per_contract)
+        .table_keep_resident(max_elements_per_contract_table);
 
     let mut config = wasmtime::Config::default();
     config
-        //.allocation_strategy(wasmtime::InstanceAllocationStrategy::Pooling(
-        //    pooling_config,
-        //))
+        .allocation_strategy(wasmtime::InstanceAllocationStrategy::Pooling(
+            pooling_config,
+        ))
         // From official documentation:
         // > Note that systems loading many modules may wish to disable this
         // > configuration option instead of leaving it on-by-default.
         // > Some platforms exhibit quadratic behavior when registering/unregistering
         // > unwinding information which can greatly slow down the module loading/unloading process.
         // https://docs.rs/wasmtime/latest/wasmtime/struct.Config.html#method.native_unwind_info
-        // .native_unwind_info(false)
-        // .wasm_backtrace(false)
-        // .wasm_backtrace_details(wasmtime::WasmBacktraceDetails::Disable)
-        // // Enable copy-on-write heap images.
-        // .memory_init_cow(true)
-        // // Wasm stack metering is implemented by instrumentation, we don't want wasmtime to trap before that
-        // .max_wasm_stack(1024 * 1024 * 1024)
-        // // Enable the Cranelift optimizing compiler.
-        // .strategy(wasmtime::Strategy::Cranelift)
-        // // Enable signals-based traps. This is required to elide explicit bounds-checking.
-        // .signals_based_traps(true)
-        // // Configure linear memories such that explicit bounds-checking can be elided.
-        // .force_memory_init_memfd(true)
-        // .memory_guaranteed_dense_image_size(max_memory_size.try_into().unwrap_or(u64::MAX))
-        // .guard_before_linear_memory(false)
-        // .memory_guard_size(0)
-        // .memory_may_move(false)
-        // .memory_reservation(max_memory_size.try_into().unwrap_or(u64::MAX))
-        // .memory_reservation_for_growth(0)
+        .native_unwind_info(false)
+        .wasm_backtrace(false)
+        .wasm_backtrace_details(wasmtime::WasmBacktraceDetails::Disable)
+        // Enable copy-on-write heap images.
+        .memory_init_cow(true)
+        // Wasm stack metering is implemented by instrumentation, we don't want wasmtime to trap before that
+        .max_wasm_stack(1024 * 1024 * 1024)
+        // Enable the Cranelift optimizing compiler.
+        .strategy(wasmtime::Strategy::Cranelift)
+        // Enable signals-based traps. This is required to elide explicit bounds-checking.
+        .signals_based_traps(true)
+        // Configure linear memories such that explicit bounds-checking can be elided.
+        .force_memory_init_memfd(true)
+        .memory_guaranteed_dense_image_size(max_memory_size.try_into().unwrap_or(u64::MAX))
+        .guard_before_linear_memory(false)
+        .memory_guard_size(0)
+        .memory_may_move(false)
+        .memory_reservation(max_memory_size.try_into().unwrap_or(u64::MAX))
+        .memory_reservation_for_growth(0)
         .compiler_inlining(true)
         .cranelift_nan_canonicalization(true)
         .wasm_wide_arithmetic(true);
