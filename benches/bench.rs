@@ -302,15 +302,21 @@ fn bench_module(
 
     g.bench_function("noop", |b| {
         b.iter_batched(
-            || setup(&noop, Rc::default()),
-            |(f, _, store)| f.call(store, ()),
+            || {},
+            |()| {
+                let (f, _, store) = setup(&noop, Rc::default());
+                f.call(store, ())
+            },
             BatchSize::SmallInput,
         )
     });
     g.bench_with_input("small input", &Rc::from(SMALL_INPUT), |b, input| {
         b.iter_batched(
-            || setup(&run_small, Rc::clone(input)),
-            |(f, _, store)| f.call(store, ()),
+            || Rc::clone(input),
+            |input| {
+                let (f, _, store) = setup(&run_small, input);
+                f.call(store, ())
+            },
             BatchSize::SmallInput,
         )
     });
@@ -319,8 +325,9 @@ fn bench_module(
         &Rc::<[u8]>::from(SMALL_INPUT),
         |b, input| {
             b.iter_batched(
-                || setup_bytes(&run_small_bytes),
-                |(f, memory, mut store)| {
+                || input,
+                |input| {
+                    let (f, memory, mut store) = setup_bytes(&run_small_bytes);
                     memory.data_mut(&mut store)[..input.len()].copy_from_slice(input);
                     f.call(store, (0, input.len() as _))
                 },
@@ -330,8 +337,11 @@ fn bench_module(
     );
     g.bench_with_input("big input", &Rc::from(BIG_INPUT), |b, input| {
         b.iter_batched(
-            || setup(&run_big, Rc::clone(input)),
-            |(f, _, store)| f.call(store, ()),
+            || Rc::clone(input),
+            |input| {
+                let (f, _, store) = setup(&run_big, input);
+                f.call(store, ())
+            },
             BatchSize::SmallInput,
         )
     });
@@ -340,8 +350,9 @@ fn bench_module(
         &Rc::<[u8]>::from(BIG_INPUT),
         |b, input| {
             b.iter_batched(
-                || setup_bytes(&run_big_bytes),
-                |(f, memory, mut store)| {
+                || input,
+                |input| {
+                    let (f, memory, mut store) = setup_bytes(&run_big_bytes);
                     memory.data_mut(&mut store)[..input.len()].copy_from_slice(input);
                     f.call(store, (0, input.len() as _))
                 },
@@ -387,8 +398,9 @@ fn bench_component(
 
     g.bench_function("noop", |b| {
         b.iter_batched(
-            || setup_runner(Rc::default()),
-            |(runner, store)| {
+            || {},
+            |()| {
+                let (runner, store) = setup_runner(Rc::default());
                 runner.call_noop(store).unwrap();
             },
             BatchSize::SmallInput,
@@ -396,8 +408,9 @@ fn bench_component(
     });
     g.bench_with_input("small input", &Rc::from(SMALL_INPUT), |b, input| {
         b.iter_batched(
-            || setup_runner(Rc::clone(input)),
-            |(runner, store)| {
+            || Rc::clone(input),
+            |input| {
+                let (runner, store) = setup_runner(input);
                 runner.call_run_small(store).unwrap();
             },
             BatchSize::SmallInput,
@@ -408,143 +421,144 @@ fn bench_component(
         &Rc::from(SMALL_INPUT),
         |b, input| {
             b.iter_batched(
-                || setup_runner(Rc::default()),
-                |(runner, store)| {
+                || input,
+                |input| {
+                    let (runner, store) = setup_runner(Rc::default());
                     runner.call_run_small_bytes(store, input).unwrap();
                 },
                 BatchSize::SmallInput,
             );
         },
     );
-    g.bench_function("small input typed args", |b| {
-        b.iter_batched(
-            || {
-                let (runner, runner_store) = setup_runner(Rc::default());
-                let (codec, mut codec_store) = setup_codec();
-                let c_ty = codec
-                    .rvolosatovs_serde_reflect()
-                    .tuple_type()
-                    .call_constructor(
-                        &mut codec_store,
-                        &[reflect::Type::U32, reflect::Type::U32, reflect::Type::U32],
-                    )
-                    .unwrap();
-                let ty = codec
-                    .rvolosatovs_serde_reflect()
-                    .record_type()
-                    .call_constructor(
-                        &mut codec_store,
-                        &[
-                            ("a".into(), reflect::Type::String),
-                            ("b".into(), reflect::Type::U32),
-                            ("c".into(), reflect::Type::Tuple(c_ty)),
-                        ],
-                    )
-                    .unwrap();
-                let de = codec
-                    .rvolosatovs_serde_deserializer()
-                    .deserializer()
-                    .call_from_list(&mut codec_store, SMALL_INPUT)
-                    .unwrap();
-                (runner, runner_store, codec, codec_store, de, ty, c_ty)
-            },
-            |(runner, runner_store, codec, mut codec_store, de, ty, c_ty)| {
-                let (idx, de, next) = codec
-                    .rvolosatovs_serde_deserializer()
-                    .deserializer()
-                    .call_deserialize_record(&mut codec_store, de, ty)
-                    .unwrap()
-                    .unwrap();
-                assert_eq!(idx, 0);
-                let a = codec
-                    .rvolosatovs_serde_deserializer()
-                    .deserializer()
-                    .call_deserialize_string(&mut codec_store, de)
-                    .unwrap()
-                    .unwrap();
+    g.bench_with_input(
+        "small input typed args",
+        &Rc::from(SMALL_INPUT),
+        |b, input| {
+            b.iter_batched(
+                || input,
+                |input| {
+                    let (runner, runner_store) = setup_runner(Rc::default());
+                    let (codec, mut codec_store) = setup_codec();
+                    let c_ty = codec
+                        .rvolosatovs_serde_reflect()
+                        .tuple_type()
+                        .call_constructor(
+                            &mut codec_store,
+                            &[reflect::Type::U32, reflect::Type::U32, reflect::Type::U32],
+                        )
+                        .unwrap();
+                    let ty = codec
+                        .rvolosatovs_serde_reflect()
+                        .record_type()
+                        .call_constructor(
+                            &mut codec_store,
+                            &[
+                                ("a".into(), reflect::Type::String),
+                                ("b".into(), reflect::Type::U32),
+                                ("c".into(), reflect::Type::Tuple(c_ty)),
+                            ],
+                        )
+                        .unwrap();
+                    let de = codec
+                        .rvolosatovs_serde_deserializer()
+                        .deserializer()
+                        .call_from_list(&mut codec_store, input)
+                        .unwrap();
 
-                let (idx, de, next) = codec
-                    .rvolosatovs_serde_deserializer()
-                    .record_deserializer()
-                    .call_next(&mut codec_store, next)
-                    .unwrap();
-                assert_eq!(idx, 1);
-                let b = codec
-                    .rvolosatovs_serde_deserializer()
-                    .deserializer()
-                    .call_deserialize_u32(&mut codec_store, de)
-                    .unwrap()
-                    .unwrap();
+                    let (idx, de, next) = codec
+                        .rvolosatovs_serde_deserializer()
+                        .deserializer()
+                        .call_deserialize_record(&mut codec_store, de, ty)
+                        .unwrap()
+                        .unwrap();
+                    assert_eq!(idx, 0);
+                    let a = codec
+                        .rvolosatovs_serde_deserializer()
+                        .deserializer()
+                        .call_deserialize_string(&mut codec_store, de)
+                        .unwrap()
+                        .unwrap();
 
-                let (idx, de, _) = codec
-                    .rvolosatovs_serde_deserializer()
-                    .record_deserializer()
-                    .call_next(&mut codec_store, next)
-                    .unwrap();
-                assert_eq!(idx, 2);
-                let (de, c_next) = codec
-                    .rvolosatovs_serde_deserializer()
-                    .deserializer()
-                    .call_deserialize_tuple(&mut codec_store, de, c_ty)
-                    .unwrap()
-                    .unwrap();
-                let c0 = codec
-                    .rvolosatovs_serde_deserializer()
-                    .deserializer()
-                    .call_deserialize_u32(&mut codec_store, de)
-                    .unwrap()
-                    .unwrap();
+                    let (idx, de, next) = codec
+                        .rvolosatovs_serde_deserializer()
+                        .record_deserializer()
+                        .call_next(&mut codec_store, next)
+                        .unwrap();
+                    assert_eq!(idx, 1);
+                    let b = codec
+                        .rvolosatovs_serde_deserializer()
+                        .deserializer()
+                        .call_deserialize_u32(&mut codec_store, de)
+                        .unwrap()
+                        .unwrap();
 
-                let (de, c_next) = codec
-                    .rvolosatovs_serde_deserializer()
-                    .tuple_deserializer()
-                    .call_next(&mut codec_store, c_next)
-                    .unwrap();
-                let c1 = codec
-                    .rvolosatovs_serde_deserializer()
-                    .deserializer()
-                    .call_deserialize_u32(&mut codec_store, de)
-                    .unwrap()
-                    .unwrap();
+                    let (idx, de, _) = codec
+                        .rvolosatovs_serde_deserializer()
+                        .record_deserializer()
+                        .call_next(&mut codec_store, next)
+                        .unwrap();
+                    assert_eq!(idx, 2);
+                    let (de, c_next) = codec
+                        .rvolosatovs_serde_deserializer()
+                        .deserializer()
+                        .call_deserialize_tuple(&mut codec_store, de, c_ty)
+                        .unwrap()
+                        .unwrap();
+                    let c0 = codec
+                        .rvolosatovs_serde_deserializer()
+                        .deserializer()
+                        .call_deserialize_u32(&mut codec_store, de)
+                        .unwrap()
+                        .unwrap();
 
-                let (de, _) = codec
-                    .rvolosatovs_serde_deserializer()
-                    .tuple_deserializer()
-                    .call_next(&mut codec_store, c_next)
-                    .unwrap();
-                let c2 = codec
-                    .rvolosatovs_serde_deserializer()
-                    .deserializer()
-                    .call_deserialize_u32(&mut codec_store, de)
-                    .unwrap()
-                    .unwrap();
+                    let (de, c_next) = codec
+                        .rvolosatovs_serde_deserializer()
+                        .tuple_deserializer()
+                        .call_next(&mut codec_store, c_next)
+                        .unwrap();
+                    let c1 = codec
+                        .rvolosatovs_serde_deserializer()
+                        .deserializer()
+                        .call_deserialize_u32(&mut codec_store, de)
+                        .unwrap()
+                        .unwrap();
 
-                runner
-                    .call_run_small_typed(
-                        runner_store,
-                        &bindings::SmallInput {
-                            a,
-                            b,
-                            c: (c0, c1, c2),
-                        },
-                    )
-                    .unwrap();
-            },
-            BatchSize::SmallInput,
-        );
-    });
+                    let (de, _) = codec
+                        .rvolosatovs_serde_deserializer()
+                        .tuple_deserializer()
+                        .call_next(&mut codec_store, c_next)
+                        .unwrap();
+                    let c2 = codec
+                        .rvolosatovs_serde_deserializer()
+                        .deserializer()
+                        .call_deserialize_u32(&mut codec_store, de)
+                        .unwrap()
+                        .unwrap();
+
+                    runner
+                        .call_run_small_typed(
+                            runner_store,
+                            &bindings::SmallInput {
+                                a,
+                                b,
+                                c: (c0, c1, c2),
+                            },
+                        )
+                        .unwrap();
+                },
+                BatchSize::SmallInput,
+            );
+        },
+    );
     g.bench_function("small input deserialized typed args", |b| {
         b.iter_batched(
-            || {
-                let (runner, store) = setup_runner(Rc::default());
-                let input = bindings::SmallInput {
-                    a: "test".into(),
-                    b: 42,
-                    c: (0, 1, 2),
-                };
-                (runner, store, input)
+            || bindings::SmallInput {
+                a: "test".into(),
+                b: 42,
+                c: (0, 1, 2),
             },
-            |(runner, store, input)| {
+            |input| {
+                let (runner, store) = setup_runner(Rc::default());
                 runner.call_run_small_typed(store, &input).unwrap();
             },
             BatchSize::SmallInput,
@@ -552,8 +566,9 @@ fn bench_component(
     });
     g.bench_with_input("big input", &Rc::from(BIG_INPUT), |b, input| {
         b.iter_batched(
-            || setup_runner(Rc::clone(input)),
-            |(runner, store)| {
+            || Rc::clone(input),
+            |input| {
+                let (runner, store) = setup_runner(input);
                 runner.call_run_big(store).unwrap();
             },
             BatchSize::SmallInput,
@@ -561,17 +576,19 @@ fn bench_component(
     });
     g.bench_with_input("big input byte args", &Rc::from(BIG_INPUT), |b, input| {
         b.iter_batched(
-            || setup_runner(Rc::default()),
-            |(runner, store)| {
+            || input,
+            |input| {
+                let (runner, store) = setup_runner(Rc::default());
                 runner.call_run_big_bytes(store, input).unwrap();
             },
             BatchSize::SmallInput,
         );
     });
-    g.bench_function("big input typed args", |b| {
+    g.bench_with_input("big input typed args", &Rc::from(BIG_INPUT), |b, input| {
         b.iter_batched(
-            || {
-                let (runner, runner_store) = setup_runner(Rc::default());
+            || input,
+            |input| {
+                let (runner, mut runner_store) = setup_runner(Rc::default());
                 let (codec, mut codec_store) = setup_codec();
 
                 let payload_ty = codec
@@ -617,20 +634,9 @@ fn bench_component(
                 let de = codec
                     .rvolosatovs_serde_deserializer()
                     .deserializer()
-                    .call_from_list(&mut codec_store, BIG_INPUT)
+                    .call_from_list(&mut codec_store, input)
                     .unwrap();
-                (
-                    runner,
-                    runner_store,
-                    codec,
-                    codec_store,
-                    de,
-                    ty,
-                    signed_ty,
-                    payload_ty,
-                )
-            },
-            |(runner, mut runner_store, codec, mut codec_store, de, ty, signed_ty, payload_ty)| {
+
                 let input = deserialize_big_input(
                     &mut codec_store,
                     codec.rvolosatovs_serde_deserializer(),
@@ -649,8 +655,6 @@ fn bench_component(
     g.bench_function("big input deserialized typed args", |b| {
         b.iter_batched(
             || {
-                let (runner, store) = setup_runner(Rc::default());
-
                 let first = bindings::BigInputElement {
                     payload: bindings::BigInputElementPayload {
                         nonce: BIG_INPUT_FIRST_NONCE.into(),
@@ -673,12 +677,12 @@ fn bench_component(
                     signature: BIG_INPUT_SECOND_SIGNATURE.into(),
                     public_key: BIG_INPUT_SECOND_PUBLIC_KEY.into(),
                 };
-                let input = bindings::BigInput {
+                bindings::BigInput {
                     signed: vec![first, second],
-                };
-                (runner, store, input)
+                }
             },
-            |(runner, store, input)| {
+            |input| {
+                let (runner, store) = setup_runner(Rc::default());
                 runner.call_run_big_typed(store, &input).unwrap();
             },
             BatchSize::SmallInput,
