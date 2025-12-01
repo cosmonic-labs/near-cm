@@ -1,4 +1,5 @@
 use core::ops::{Deref, DerefMut};
+
 use std::ffi::OsStr;
 use std::fs;
 use std::path::PathBuf;
@@ -325,8 +326,8 @@ fn bench_module(
         &Rc::<[u8]>::from(SMALL_INPUT),
         |b, input| {
             b.iter_batched(
-                || input,
-                |input| {
+                || {},
+                |()| {
                     let (f, memory, mut store) = setup_bytes(&run_small_bytes);
                     memory.data_mut(&mut store)[..input.len()].copy_from_slice(input);
                     f.call(store, (0, input.len() as _))
@@ -350,8 +351,8 @@ fn bench_module(
         &Rc::<[u8]>::from(BIG_INPUT),
         |b, input| {
             b.iter_batched(
-                || input,
-                |input| {
+                || {},
+                |()| {
                     let (f, memory, mut store) = setup_bytes(&run_big_bytes);
                     memory.data_mut(&mut store)[..input.len()].copy_from_slice(input);
                     f.call(store, (0, input.len() as _))
@@ -421,8 +422,8 @@ fn bench_component(
         &Rc::from(SMALL_INPUT),
         |b, input| {
             b.iter_batched(
-                || input,
-                |input| {
+                || {},
+                |()| {
                     let (runner, store) = setup_runner(Rc::default());
                     runner.call_run_small_bytes(store, input).unwrap();
                 },
@@ -430,14 +431,13 @@ fn bench_component(
             );
         },
     );
+
     g.bench_with_input(
         "small input typed args",
         &Rc::from(SMALL_INPUT),
         |b, input| {
             b.iter_batched(
-                || input,
-                |input| {
-                    let (runner, runner_store) = setup_runner(Rc::default());
+                || {
                     let (codec, mut codec_store) = setup_codec();
                     let c_ty = codec
                         .rvolosatovs_serde_reflect()
@@ -459,6 +459,10 @@ fn bench_component(
                             ],
                         )
                         .unwrap();
+                    (codec, codec_store, ty, c_ty)
+                },
+                |(codec, mut codec_store, ty, c_ty)| {
+                    let (runner, runner_store) = setup_runner(Rc::default());
                     let de = codec
                         .rvolosatovs_serde_deserializer()
                         .deserializer()
@@ -576,8 +580,8 @@ fn bench_component(
     });
     g.bench_with_input("big input byte args", &Rc::from(BIG_INPUT), |b, input| {
         b.iter_batched(
-            || input,
-            |input| {
+            || {},
+            |()| {
                 let (runner, store) = setup_runner(Rc::default());
                 runner.call_run_big_bytes(store, input).unwrap();
             },
@@ -586,9 +590,7 @@ fn bench_component(
     });
     g.bench_with_input("big input typed args", &Rc::from(BIG_INPUT), |b, input| {
         b.iter_batched(
-            || input,
-            |input| {
-                let (runner, mut runner_store) = setup_runner(Rc::default());
+            || {
                 let (codec, mut codec_store) = setup_codec();
 
                 let payload_ty = codec
@@ -631,6 +633,10 @@ fn bench_component(
                         &[("signed".into(), reflect::Type::List(signed_list_ty))],
                     )
                     .unwrap();
+                (codec, codec_store, ty, signed_ty, payload_ty)
+            },
+            |(codec, mut codec_store, ty, signed_ty, payload_ty)| {
+                let (runner, mut runner_store) = setup_runner(Rc::default());
                 let de = codec
                     .rvolosatovs_serde_deserializer()
                     .deserializer()
