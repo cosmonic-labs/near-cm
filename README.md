@@ -135,7 +135,7 @@ Instantiate module, call `run_big_bytes`.
 We measure two different Wasm components:
 
 - `component bunding serde_json`: a component bundling `serde_json`, aiming to match existing module behavior as much as possible.
-- `component composed with codec`: a component [composed](https://component-model.bytecodealliance.org/composing-and-distributing/composing.html), with a codec component implemented at https://github.com/rvolosatovs/wasm-serde/tree/56dc189630792cff8dae099275aa7659e331376e/json
+- `component composed with codec`: a component [composed](https://component-model.bytecodealliance.org/composing-and-distributing/composing.html), with a codec component implemented at [`./wasm-serde/json`](https://github.com/rvolosatovs/wasm-serde/tree/56dc189630792cff8dae099275aa7659e331376e/json)
 
 For Wasm components we benchmark 9 scenarios
 
@@ -204,6 +204,8 @@ This benchmark represents the cost of invoking `run-big-typed` without any deser
 ### Results
 
 Benchmarks were run on a machine provisioned for us by NEAR.
+
+Generated `critertion` report for this benchmark can be found at [`./benches/criterion-report`](./benches/criterion-report).
 
 <details>
     <summary><code>cargo bench</code></summary>
