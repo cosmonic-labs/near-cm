@@ -11,7 +11,7 @@ use criterion::measurement::Measurement;
 use criterion::{BatchSize, BenchmarkGroup, Criterion};
 use wac_graph::types::Package;
 use wac_graph::{CompositionGraph, EncodeOptions};
-use wasmtime::component::{Component, HasSelf, ResourceAny};
+use wasmtime::component::{Component, HasSelf};
 use wasmtime::{Caller, Engine, Extern, Module, ModuleExport, Store, component};
 use wit_component::ComponentEncoder;
 
@@ -65,6 +65,73 @@ mod codec_bindings {
     wasmtime::component::bindgen!({
         world: "format",
     });
+
+    use exports::rvolosatovs::serde::reflect::{Guest, List, Value};
+    use wasmtime::Store;
+
+    macro_rules! impl_unwrap_value_primitive {
+        ($rt:ident, $f:ident, $f_list:ident, $t:ty) => {
+            #[allow(dead_code)]
+            #[track_caller]
+            pub fn $f(self) -> $t {
+                let Value::$rt(v) = self else {
+                    panic!("invalid value type");
+                };
+                v
+            }
+
+            #[allow(dead_code)]
+            #[track_caller]
+            pub fn $f_list(self) -> Vec<$t> {
+                let Value::List(List::$rt(vs)) = self else {
+                    panic!("invalid value list type");
+                };
+                vs
+            }
+        };
+    }
+
+    impl Value {
+        impl_unwrap_value_primitive!(Bool, unwrap_bool, unwrap_list_bool, bool);
+        impl_unwrap_value_primitive!(U8, unwrap_u8, unwrap_list_u8, u8);
+        impl_unwrap_value_primitive!(U16, unwrap_u16, unwrap_list_u16, u16);
+        impl_unwrap_value_primitive!(U32, unwrap_u32, unwrap_list_u32, u32);
+        impl_unwrap_value_primitive!(U64, unwrap_u64, unwrap_list_u64, u64);
+        impl_unwrap_value_primitive!(S8, unwrap_s8, unwrap_list_s8, i8);
+        impl_unwrap_value_primitive!(S16, unwrap_s16, unwrap_list_s16, i16);
+        impl_unwrap_value_primitive!(S32, unwrap_s32, unwrap_list_s32, i32);
+        impl_unwrap_value_primitive!(S64, unwrap_s64, unwrap_list_s64, i64);
+        impl_unwrap_value_primitive!(F32, unwrap_f32, unwrap_list_f32, f32);
+        impl_unwrap_value_primitive!(F64, unwrap_f64, unwrap_list_f64, f64);
+        impl_unwrap_value_primitive!(Char, unwrap_char, unwrap_list_char, char);
+        impl_unwrap_value_primitive!(String, unwrap_string, unwrap_list_string, String);
+        impl_unwrap_value_primitive!(Flags, unwrap_flags, unwrap_list_flags, u32);
+        impl_unwrap_value_primitive!(Enum, unwrap_enum, unwrap_list_enum, u32);
+
+        #[track_caller]
+        pub fn unwrap_record<T>(self, store: &mut Store<T>, reflect: &Guest) -> Vec<Value> {
+            let Value::Record(v) = self else {
+                panic!("invalid value type");
+            };
+            reflect.record_value().call_into_value(store, v).unwrap()
+        }
+
+        #[track_caller]
+        pub fn unwrap_tuple<T>(self, store: &mut Store<T>, reflect: &Guest) -> Vec<Value> {
+            let Value::Tuple(v) = self else {
+                panic!("invalid value type");
+            };
+            reflect.tuple_value().call_into_value(store, v).unwrap()
+        }
+
+        #[track_caller]
+        pub fn unwrap_list(self) -> List {
+            let Value::List(v) = self else {
+                panic!("invalid value type");
+            };
+            v
+        }
+    }
 }
 
 struct Ctx<T> {
@@ -96,45 +163,14 @@ impl<T> bindings::ComponentImports for Ctx<T> {
     }
 }
 
-fn deserialize_big_input_element_payload<T>(
-    mut store: &mut Store<T>,
-    codec: &codec_bindings::exports::rvolosatovs::serde::deserializer::Guest,
-    de: ResourceAny,
-    ty: ResourceAny,
+fn unwrap_big_input_element_payload(
+    fields: impl IntoIterator<Item = reflect::Value>,
 ) -> bindings::BigInputElementPayload {
-    let (idx, de, next) = codec
-        .deserializer()
-        .call_deserialize_record(&mut store, de, ty)
-        .unwrap()
-        .unwrap();
-    assert_eq!(idx, 0);
-    let nonce = codec
-        .deserializer()
-        .call_deserialize_string(&mut store, de)
-        .unwrap()
-        .unwrap();
+    let mut fields = fields.into_iter();
 
-    let (idx, de, next) = codec
-        .record_deserializer()
-        .call_next(&mut store, next)
-        .unwrap();
-    assert_eq!(idx, 1);
-    let message = codec
-        .deserializer()
-        .call_deserialize_string(&mut store, de)
-        .unwrap()
-        .unwrap();
-
-    let (idx, de, _) = codec
-        .record_deserializer()
-        .call_next(&mut store, next)
-        .unwrap();
-    assert_eq!(idx, 2);
-    let recipient = codec
-        .deserializer()
-        .call_deserialize_string(&mut store, de)
-        .unwrap()
-        .unwrap();
+    let nonce = fields.next().unwrap().unwrap_string();
+    let message = fields.next().unwrap().unwrap_string();
+    let recipient = fields.next().unwrap().unwrap_string();
 
     bindings::BigInputElementPayload {
         nonce,
@@ -143,53 +179,19 @@ fn deserialize_big_input_element_payload<T>(
     }
 }
 
-fn deserialize_big_input_element<T>(
-    mut store: &mut Store<T>,
-    codec: &codec_bindings::exports::rvolosatovs::serde::deserializer::Guest,
-    de: ResourceAny,
-    ty: ResourceAny,
-    payload_ty: ResourceAny,
+fn unwrap_big_input_element<T>(
+    store: &mut Store<T>,
+    reflect: &codec_bindings::exports::rvolosatovs::serde::reflect::Guest,
+    fields: impl IntoIterator<Item = reflect::Value>,
 ) -> bindings::BigInputElement {
-    let (idx, de, next) = codec
-        .deserializer()
-        .call_deserialize_record(&mut store, de, ty)
-        .unwrap()
-        .unwrap();
-    assert_eq!(idx, 0);
-    let payload = deserialize_big_input_element_payload(&mut store, codec, de, payload_ty);
+    let mut fields = fields.into_iter();
 
-    let (idx, de, next) = codec
-        .record_deserializer()
-        .call_next(&mut store, next)
-        .unwrap();
-    assert_eq!(idx, 1);
-    let standard = codec
-        .deserializer()
-        .call_deserialize_string(&mut store, de)
-        .unwrap()
-        .unwrap();
+    let payload = fields.next().unwrap().unwrap_record(store, reflect);
+    let payload = unwrap_big_input_element_payload(payload);
 
-    let (idx, de, next) = codec
-        .record_deserializer()
-        .call_next(&mut store, next)
-        .unwrap();
-    assert_eq!(idx, 2);
-    let signature = codec
-        .deserializer()
-        .call_deserialize_string(&mut store, de)
-        .unwrap()
-        .unwrap();
-
-    let (idx, de, _) = codec
-        .record_deserializer()
-        .call_next(&mut store, next)
-        .unwrap();
-    assert_eq!(idx, 3);
-    let public_key = codec
-        .deserializer()
-        .call_deserialize_string(&mut store, de)
-        .unwrap()
-        .unwrap();
+    let standard = fields.next().unwrap().unwrap_string();
+    let signature = fields.next().unwrap().unwrap_string();
+    let public_key = fields.next().unwrap().unwrap_string();
 
     bindings::BigInputElement {
         payload,
@@ -199,35 +201,25 @@ fn deserialize_big_input_element<T>(
     }
 }
 
-fn deserialize_big_input<T>(
+fn unwrap_big_input<T>(
     mut store: &mut Store<T>,
-    codec: &codec_bindings::exports::rvolosatovs::serde::deserializer::Guest,
-    de: ResourceAny,
-    ty: ResourceAny,
-    signed_ty: ResourceAny,
-    payload_ty: ResourceAny,
+    reflect: &codec_bindings::exports::rvolosatovs::serde::reflect::Guest,
+    v: reflect::Value,
 ) -> bindings::BigInput {
-    let (idx, de, _) = codec
-        .deserializer()
-        .call_deserialize_record(&mut store, de, ty)
-        .unwrap()
-        .unwrap();
-    assert_eq!(idx, 0);
+    let fields = v.unwrap_record(store, reflect);
+    let mut fields = fields.into_iter();
 
-    let mut elems = codec
-        .deserializer()
-        .call_deserialize_list(&mut store, de, reflect::Type::Record(signed_ty))
-        .unwrap()
-        .unwrap();
-    let mut signed = Vec::default();
-    while let Some((de, next)) = codec
-        .list_deserializer()
-        .call_next(&mut store, elems)
-        .unwrap()
-    {
-        let el = deserialize_big_input_element(&mut store, codec, de, signed_ty, payload_ty);
+    let reflect::List::Record(elems) = fields.next().unwrap().unwrap_list() else {
+        panic!("invalid list type");
+    };
+    let mut signed = Vec::with_capacity(elems.len());
+    for v in elems {
+        let fields = reflect
+            .record_value()
+            .call_into_value(&mut store, v)
+            .unwrap();
+        let el = unwrap_big_input_element(&mut store, reflect, fields);
         signed.push(el);
-        elems = next;
     }
     bindings::BigInput { signed }
 }
@@ -372,20 +364,28 @@ fn bench_component(
 ) -> anyhow::Result<()> {
     let engine = Engine::new(config)?;
 
-    let codec = Component::new(&engine, codec)?;
+    let codec = Component::new(&engine, codec).context("failed to compile codec")?;
     let linker = component::Linker::new(&engine);
-    let codec_pre = linker.instantiate_pre(&codec)?;
-    let codec_pre = codec_bindings::FormatPre::new(codec_pre)?;
+    let codec_pre = linker
+        .instantiate_pre(&codec)
+        .context("failed to pre-instantiate codec")?;
+    let codec_pre =
+        codec_bindings::FormatPre::new(codec_pre).context("failed to cast codec instance")?;
 
     let runner = Component::new(&engine, runner)?;
     let mut linker = component::Linker::new(&engine);
     bindings::Component::add_to_linker::<_, HasSelf<Ctx<()>>>(&mut linker, |cx| cx)?;
-    let runner_pre = linker.instantiate_pre(&runner)?;
-    let runner_pre = bindings::ComponentPre::new(runner_pre)?;
+    let runner_pre = linker
+        .instantiate_pre(&runner)
+        .context("failed to pre-instantiate runner")?;
+    let runner_pre =
+        bindings::ComponentPre::new(runner_pre).context("failed to cast runner instance")?;
 
     let setup_runner = |input| {
         let mut store = Store::new(&engine, Ctx { input, state: () });
-        let runner = runner_pre.instantiate(&mut store).unwrap();
+        let runner = runner_pre
+            .instantiate(&mut store)
+            .expect("failed to instantiate runner");
         (runner, store)
     };
 
@@ -459,85 +459,31 @@ fn bench_component(
                             ],
                         )
                         .unwrap();
-                    (codec, codec_store, ty, c_ty)
+                    (codec, codec_store, reflect::Type::Record(ty))
                 },
-                |(codec, mut codec_store, ty, c_ty)| {
+                |(codec, mut codec_store, ty)| {
                     let (runner, runner_store) = setup_runner(Rc::default());
-                    let de = codec
+                    let v = codec
                         .rvolosatovs_serde_deserializer()
-                        .deserializer()
-                        .call_from_list(&mut codec_store, input)
-                        .unwrap();
-
-                    let (idx, de, next) = codec
-                        .rvolosatovs_serde_deserializer()
-                        .deserializer()
-                        .call_deserialize_record(&mut codec_store, de, ty)
-                        .unwrap()
-                        .unwrap();
-                    assert_eq!(idx, 0);
-                    let a = codec
-                        .rvolosatovs_serde_deserializer()
-                        .deserializer()
-                        .call_deserialize_string(&mut codec_store, de)
+                        .call_from_list(&mut codec_store, input, ty)
                         .unwrap()
                         .unwrap();
 
-                    let (idx, de, next) = codec
-                        .rvolosatovs_serde_deserializer()
-                        .record_deserializer()
-                        .call_next(&mut codec_store, next)
-                        .unwrap();
-                    assert_eq!(idx, 1);
-                    let b = codec
-                        .rvolosatovs_serde_deserializer()
-                        .deserializer()
-                        .call_deserialize_u32(&mut codec_store, de)
-                        .unwrap()
-                        .unwrap();
+                    let fields =
+                        v.unwrap_record(&mut codec_store, codec.rvolosatovs_serde_reflect());
+                    let mut fields = fields.into_iter();
 
-                    let (idx, de, _) = codec
-                        .rvolosatovs_serde_deserializer()
-                        .record_deserializer()
-                        .call_next(&mut codec_store, next)
-                        .unwrap();
-                    assert_eq!(idx, 2);
-                    let (de, c_next) = codec
-                        .rvolosatovs_serde_deserializer()
-                        .deserializer()
-                        .call_deserialize_tuple(&mut codec_store, de, c_ty)
+                    let a = fields.next().unwrap().unwrap_string();
+                    let b = fields.next().unwrap().unwrap_u32();
+                    let c_values = fields
+                        .next()
                         .unwrap()
-                        .unwrap();
-                    let c0 = codec
-                        .rvolosatovs_serde_deserializer()
-                        .deserializer()
-                        .call_deserialize_u32(&mut codec_store, de)
-                        .unwrap()
-                        .unwrap();
+                        .unwrap_tuple(&mut codec_store, codec.rvolosatovs_serde_reflect());
+                    let mut c_values = c_values.into_iter();
 
-                    let (de, c_next) = codec
-                        .rvolosatovs_serde_deserializer()
-                        .tuple_deserializer()
-                        .call_next(&mut codec_store, c_next)
-                        .unwrap();
-                    let c1 = codec
-                        .rvolosatovs_serde_deserializer()
-                        .deserializer()
-                        .call_deserialize_u32(&mut codec_store, de)
-                        .unwrap()
-                        .unwrap();
-
-                    let (de, _) = codec
-                        .rvolosatovs_serde_deserializer()
-                        .tuple_deserializer()
-                        .call_next(&mut codec_store, c_next)
-                        .unwrap();
-                    let c2 = codec
-                        .rvolosatovs_serde_deserializer()
-                        .deserializer()
-                        .call_deserialize_u32(&mut codec_store, de)
-                        .unwrap()
-                        .unwrap();
+                    let c0 = c_values.next().unwrap().unwrap_u32();
+                    let c1 = c_values.next().unwrap().unwrap_u32();
+                    let c2 = c_values.next().unwrap().unwrap_u32();
 
                     runner
                         .call_run_small_typed(
@@ -620,37 +566,29 @@ fn bench_component(
                     )
                     .unwrap();
 
-                let signed_list_ty = codec
-                    .rvolosatovs_serde_reflect()
-                    .list_type()
-                    .call_constructor(&mut codec_store, reflect::Type::Record(signed_ty))
-                    .unwrap();
                 let ty = codec
                     .rvolosatovs_serde_reflect()
                     .record_type()
                     .call_constructor(
                         &mut codec_store,
-                        &[("signed".into(), reflect::Type::List(signed_list_ty))],
+                        &[(
+                            "signed".into(),
+                            reflect::Type::List(reflect::ListType::Record(signed_ty)),
+                        )],
                     )
                     .unwrap();
-                (codec, codec_store, ty, signed_ty, payload_ty)
+                (codec, codec_store, reflect::Type::Record(ty))
             },
-            |(codec, mut codec_store, ty, signed_ty, payload_ty)| {
+            |(codec, mut codec_store, ty)| {
                 let (runner, mut runner_store) = setup_runner(Rc::default());
-                let de = codec
+                let v = codec
                     .rvolosatovs_serde_deserializer()
-                    .deserializer()
-                    .call_from_list(&mut codec_store, input)
+                    .call_from_list(&mut codec_store, input, ty)
+                    .unwrap()
                     .unwrap();
 
-                let input = deserialize_big_input(
-                    &mut codec_store,
-                    codec.rvolosatovs_serde_deserializer(),
-                    de,
-                    ty,
-                    signed_ty,
-                    payload_ty,
-                );
+                let input =
+                    unwrap_big_input(&mut codec_store, codec.rvolosatovs_serde_reflect(), v);
                 runner
                     .call_run_big_typed(&mut runner_store, &input)
                     .unwrap();
@@ -893,7 +831,6 @@ fn main() -> anyhow::Result<()> {
     let codec = fs::read(PathBuf::from_iter([
         env!("CARGO_MANIFEST_DIR"),
         "wasm-serde",
-        "json",
         "target",
         "wasm32-unknown-unknown",
         "release",

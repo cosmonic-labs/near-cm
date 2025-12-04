@@ -1,9 +1,9 @@
 use bench::bindings::{BigInput, BigInputElement, BigInputElementPayload, SmallInput};
 use bench::{assert_big_input, assert_small_input};
-use bindings::rvolosatovs::serde::deserializer::{
-    Deserializer, ListDeserializer, RecordDeserializer, TupleDeserializer,
+use bindings::rvolosatovs::serde::deserializer;
+use bindings::rvolosatovs::serde::reflect::{
+    List, ListType, RecordType, RecordValue, TupleType, TupleValue, Type, Value,
 };
-use bindings::rvolosatovs::serde::reflect::{ListType, RecordType, TupleType, Type};
 use std::sync::LazyLock;
 
 struct Component;
@@ -17,63 +17,112 @@ mod bindings {
 
 bench::bindings::export!(Component with_types_in bench::bindings);
 
-static SMALL_INPUT_C_TYPE: LazyLock<TupleType> =
-    LazyLock::new(|| TupleType::new(&[Type::U32, Type::U32, Type::U32]));
+macro_rules! impl_unwrap_value_primitive {
+    ($rt:ident, $f:ident, $f_list:ident, $t:ty) => {
+        #[allow(dead_code)]
+        #[track_caller]
+        pub fn $f(self) -> $t {
+            let Value::$rt(v) = self else {
+                panic!("invalid value type");
+            };
+            v
+        }
+
+        #[allow(dead_code)]
+        #[track_caller]
+        pub fn $f_list(self) -> Vec<$t> {
+            let Value::List(List::$rt(vs)) = self else {
+                panic!("invalid value list type");
+            };
+            vs
+        }
+    };
+}
+
+impl Value {
+    impl_unwrap_value_primitive!(Bool, unwrap_bool, unwrap_list_bool, bool);
+    impl_unwrap_value_primitive!(U8, unwrap_u8, unwrap_list_u8, u8);
+    impl_unwrap_value_primitive!(U16, unwrap_u16, unwrap_list_u16, u16);
+    impl_unwrap_value_primitive!(U32, unwrap_u32, unwrap_list_u32, u32);
+    impl_unwrap_value_primitive!(U64, unwrap_u64, unwrap_list_u64, u64);
+    impl_unwrap_value_primitive!(S8, unwrap_s8, unwrap_list_s8, i8);
+    impl_unwrap_value_primitive!(S16, unwrap_s16, unwrap_list_s16, i16);
+    impl_unwrap_value_primitive!(S32, unwrap_s32, unwrap_list_s32, i32);
+    impl_unwrap_value_primitive!(S64, unwrap_s64, unwrap_list_s64, i64);
+    impl_unwrap_value_primitive!(F32, unwrap_f32, unwrap_list_f32, f32);
+    impl_unwrap_value_primitive!(F64, unwrap_f64, unwrap_list_f64, f64);
+    impl_unwrap_value_primitive!(Char, unwrap_char, unwrap_list_char, char);
+    impl_unwrap_value_primitive!(String, unwrap_string, unwrap_list_string, String);
+    impl_unwrap_value_primitive!(Flags, unwrap_flags, unwrap_list_flags, u32);
+    impl_unwrap_value_primitive!(Enum, unwrap_enum, unwrap_list_enum, u32);
+
+    #[track_caller]
+    pub fn unwrap_record(self) -> Vec<Value> {
+        let Value::Record(v) = self else {
+            panic!("invalid value type");
+        };
+        RecordValue::into_value(v)
+    }
+
+    #[track_caller]
+    pub fn unwrap_tuple(self) -> Vec<Value> {
+        let Value::Tuple(v) = self else {
+            panic!("invalid value type");
+        };
+        TupleValue::into_value(v)
+    }
+
+    #[track_caller]
+    pub fn unwrap_list(self) -> List {
+        let Value::List(v) = self else {
+            panic!("invalid value type");
+        };
+        v
+    }
+}
 
 static SMALL_INPUT_TYPE: LazyLock<RecordType> = LazyLock::new(|| {
     RecordType::new(&[
         ("a".into(), Type::String),
         ("b".into(), Type::U32),
-        ("c".into(), Type::Tuple(&SMALL_INPUT_C_TYPE)),
-    ])
-});
-
-static BIG_INPUT_ELEMENT_PAYLOAD_TYPE: LazyLock<RecordType> = LazyLock::new(|| {
-    RecordType::new(&[
-        ("nonce".into(), Type::String),
-        ("message".into(), Type::String),
-        ("recipient".into(), Type::String),
-    ])
-});
-
-static BIG_INPUT_ELEMENT_TYPE: LazyLock<RecordType> = LazyLock::new(|| {
-    RecordType::new(&[
         (
-            "payload".into(),
-            Type::Record(&BIG_INPUT_ELEMENT_PAYLOAD_TYPE),
+            "c".into(),
+            Type::Tuple(&TupleType::new(&[Type::U32, Type::U32, Type::U32])),
         ),
-        ("standard".into(), Type::String),
-        ("signature".into(), Type::String),
-        ("public_key".into(), Type::String),
     ])
 });
 
-static BIG_INPUT_SIGNED_TYPE: LazyLock<ListType> =
-    LazyLock::new(|| ListType::new(&Type::Record(&BIG_INPUT_ELEMENT_TYPE)));
+static BIG_INPUT_TYPE: LazyLock<RecordType> = LazyLock::new(|| {
+    RecordType::new(&[(
+        "signed".into(),
+        Type::List(ListType::Record(&RecordType::new(&[
+            (
+                "payload".into(),
+                Type::Record(&RecordType::new(&[
+                    ("nonce".into(), Type::String),
+                    ("message".into(), Type::String),
+                    ("recipient".into(), Type::String),
+                ])),
+            ),
+            ("standard".into(), Type::String),
+            ("signature".into(), Type::String),
+            ("public_key".into(), Type::String),
+        ]))),
+    )])
+});
 
-static BIG_INPUT_TYPE: LazyLock<RecordType> =
-    LazyLock::new(|| RecordType::new(&[("signed".into(), Type::List(&BIG_INPUT_SIGNED_TYPE))]));
+pub fn assert_unwrap_small_input(v: Value) {
+    let fields = v.unwrap_record();
+    let mut fields = fields.into_iter();
 
-pub fn assert_deserialize_small_input(de: Deserializer) {
-    let (idx, a, de) = Deserializer::deserialize_record(de, &SMALL_INPUT_TYPE).unwrap();
-    assert_eq!(idx, 0);
-    let a = Deserializer::deserialize_string(a).unwrap();
+    let a = fields.next().unwrap().unwrap_string();
+    let b = fields.next().unwrap().unwrap_u32();
+    let c_values = fields.next().unwrap().unwrap_tuple();
+    let mut c_values = c_values.into_iter();
 
-    let (idx, b, de) = RecordDeserializer::next(de);
-    assert_eq!(idx, 1);
-    let b = Deserializer::deserialize_u32(b).unwrap();
-
-    let (idx, c, _) = RecordDeserializer::next(de);
-    assert_eq!(idx, 2);
-
-    let (c0, c_de) = Deserializer::deserialize_tuple(c, &SMALL_INPUT_C_TYPE).unwrap();
-    let c0 = Deserializer::deserialize_u32(c0).unwrap();
-
-    let (c1, c_de) = TupleDeserializer::next(c_de);
-    let c1 = Deserializer::deserialize_u32(c1).unwrap();
-
-    let (c2, _) = TupleDeserializer::next(c_de);
-    let c2 = Deserializer::deserialize_u32(c2).unwrap();
+    let c0 = c_values.next().unwrap().unwrap_u32();
+    let c1 = c_values.next().unwrap().unwrap_u32();
+    let c2 = c_values.next().unwrap().unwrap_u32();
 
     assert_small_input(SmallInput {
         a,
@@ -82,19 +131,14 @@ pub fn assert_deserialize_small_input(de: Deserializer) {
     })
 }
 
-pub fn deserialize_big_input_element_payload(de: Deserializer) -> BigInputElementPayload {
-    let (idx, nonce, de) =
-        Deserializer::deserialize_record(de, &BIG_INPUT_ELEMENT_PAYLOAD_TYPE).unwrap();
-    assert_eq!(idx, 0);
-    let nonce = Deserializer::deserialize_string(nonce).unwrap();
+pub fn unwrap_big_input_element_payload(
+    fields: impl IntoIterator<Item = Value>,
+) -> BigInputElementPayload {
+    let mut fields = fields.into_iter();
 
-    let (idx, message, de) = RecordDeserializer::next(de);
-    assert_eq!(idx, 1);
-    let message = Deserializer::deserialize_string(message).unwrap();
-
-    let (idx, recipient, _de) = RecordDeserializer::next(de);
-    assert_eq!(idx, 2);
-    let recipient = Deserializer::deserialize_string(recipient).unwrap();
+    let nonce = fields.next().unwrap().unwrap_string();
+    let message = fields.next().unwrap().unwrap_string();
+    let recipient = fields.next().unwrap().unwrap_string();
 
     BigInputElementPayload {
         nonce,
@@ -103,22 +147,15 @@ pub fn deserialize_big_input_element_payload(de: Deserializer) -> BigInputElemen
     }
 }
 
-pub fn deserialize_big_input_element(de: Deserializer) -> BigInputElement {
-    let (idx, payload, de) = Deserializer::deserialize_record(de, &BIG_INPUT_ELEMENT_TYPE).unwrap();
-    assert_eq!(idx, 0);
-    let payload = deserialize_big_input_element_payload(payload);
+pub fn unwrap_big_input_element(fields: impl IntoIterator<Item = Value>) -> BigInputElement {
+    let mut fields = fields.into_iter();
 
-    let (idx, standard, de) = RecordDeserializer::next(de);
-    assert_eq!(idx, 1);
-    let standard = Deserializer::deserialize_string(standard).unwrap();
+    let payload = fields.next().unwrap().unwrap_record();
+    let payload = unwrap_big_input_element_payload(payload);
 
-    let (idx, signature, de) = RecordDeserializer::next(de);
-    assert_eq!(idx, 2);
-    let signature = Deserializer::deserialize_string(signature).unwrap();
-
-    let (idx, public_key, _) = RecordDeserializer::next(de);
-    assert_eq!(idx, 3);
-    let public_key = Deserializer::deserialize_string(public_key).unwrap();
+    let standard = fields.next().unwrap().unwrap_string();
+    let signature = fields.next().unwrap().unwrap_string();
+    let public_key = fields.next().unwrap().unwrap_string();
 
     BigInputElement {
         payload,
@@ -128,23 +165,23 @@ pub fn deserialize_big_input_element(de: Deserializer) -> BigInputElement {
     }
 }
 
-pub fn deserialize_big_input(de: Deserializer) -> BigInput {
-    let (idx, signed, _) = Deserializer::deserialize_record(de, &BIG_INPUT_TYPE).unwrap();
-    assert_eq!(idx, 0);
+pub fn unwrap_big_input(v: Value) -> BigInput {
+    let fields = v.unwrap_record();
+    let mut fields = fields.into_iter();
+    let List::Record(elems) = fields.next().unwrap().unwrap_list() else {
+        panic!()
+    };
 
-    let mut elems =
-        Deserializer::deserialize_list(signed, &Type::Record(&BIG_INPUT_ELEMENT_TYPE)).unwrap();
-    let mut signed = Vec::default();
-    while let Some((de, next)) = ListDeserializer::next(elems) {
-        let el = deserialize_big_input_element(de);
+    let mut signed = Vec::with_capacity(elems.len());
+    for el in elems {
+        let el = unwrap_big_input_element(RecordValue::into_value(el));
         signed.push(el);
-        elems = next;
     }
     BigInput { signed }
 }
 
-pub fn assert_deserialize_big_input(de: Deserializer) {
-    let v = deserialize_big_input(de);
+pub fn assert_unwrap_big_input(v: Value) {
+    let v = unwrap_big_input(v);
     assert_big_input(v);
 }
 
@@ -152,19 +189,25 @@ impl bench::bindings::Guest for Component {
     fn noop() {}
 
     fn run_small() {
-        assert_deserialize_small_input(Deserializer::from_list(&bench::bindings::input()))
+        let buf = bench::bindings::input();
+        let v = deserializer::from_list(&buf, Type::Record(&SMALL_INPUT_TYPE)).unwrap();
+        assert_unwrap_small_input(v)
     }
 
     fn run_big() {
-        assert_deserialize_big_input(Deserializer::from_list(&bench::bindings::input()))
+        let buf = bench::bindings::input();
+        let v = deserializer::from_list(&buf, Type::Record(&BIG_INPUT_TYPE)).unwrap();
+        assert_unwrap_big_input(v)
     }
 
     fn run_small_bytes(buf: Vec<u8>) {
-        assert_deserialize_small_input(Deserializer::from_list(&buf))
+        let v = deserializer::from_list(&buf, Type::Record(&SMALL_INPUT_TYPE)).unwrap();
+        assert_unwrap_small_input(v)
     }
 
     fn run_big_bytes(buf: Vec<u8>) {
-        assert_deserialize_big_input(Deserializer::from_list(&buf))
+        let v = deserializer::from_list(&buf, Type::Record(&BIG_INPUT_TYPE)).unwrap();
+        assert_unwrap_big_input(v)
     }
 
     fn run_small_typed(v: SmallInput) {
