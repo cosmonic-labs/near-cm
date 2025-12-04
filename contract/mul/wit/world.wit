@@ -1,0 +1,5 @@
+package myapp:other@0.1.0;
+
+world other {
+    export mul: func(x: u64, y: u64) -> u64;
+}

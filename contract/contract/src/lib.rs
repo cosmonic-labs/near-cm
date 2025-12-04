@@ -22,6 +22,6 @@ impl Guest for Component {
     fn foo(t: TestRecord) -> u64 {
         assert_eq!(t.foo, "myfoo");
         assert_eq!(t.bar, "mybar");
-        42
+        bindings::mul(6, 7)
     }
 }

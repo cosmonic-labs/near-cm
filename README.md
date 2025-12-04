@@ -38,7 +38,7 @@ $ curl localhost:8080 -H "X-Contract: contract" -H "X-Func: myapp:app/custom@0.1
 
 
 ```
-$ curl localhost:8080 -H "X-Contract: contract" -H "X-Func: myapp:app/custom@0.1.0#foo" -H "X-Codec: https://github.com/rvolosatovs/wasm-serde/releases/download/poc-4/wasm_serde_json.wasm" -d '[{"foo":"myfoo","bar":"mybar"}]'
+$ curl localhost:8080 -H "X-Contract: contract" -H "X-Func: myapp:app/custom@0.1.0#foo" -H "X-Codec: https://github.com/rvolosatovs/wasm-serde/releases/download/poc-4/wasm_serde_json.wasm" -H "X-Target: mul" -d '[{"foo":"myfoo","bar":"mybar"}]'
 ```
 
 > [U64(42)]

@@ -20,7 +20,7 @@ use hyper_util::rt::TokioIo;
 use tokio::fs;
 use tokio::net::TcpListener;
 use url::Url;
-use wasmtime::component::{Component, InstancePre, Linker, Type, Val, types};
+use wasmtime::component::{Component, Instance, InstancePre, Linker, Type, Val, types};
 use wasmtime::{Engine, Store};
 use wit_component::ComponentEncoder;
 
@@ -28,8 +28,8 @@ use bindings::exports::rvolosatovs::serde::reflect;
 
 pub struct Error;
 
-async fn unwrap_val(
-    mut store: &mut Store<()>,
+async fn unwrap_val<T: Send>(
+    mut store: &mut Store<T>,
     v: reflect::Value,
     instance: &reflect::Guest,
     ty: Type,
@@ -96,8 +96,8 @@ async fn unwrap_val(
     }
 }
 
-async fn make_reflect_ty(
-    store: &mut Store<()>,
+async fn make_reflect_ty<T: Send>(
+    store: &mut Store<T>,
     instance: &reflect::Guest,
     ty: Type,
 ) -> wasmtime::Result<reflect::Type> {
@@ -188,8 +188,8 @@ async fn make_reflect_ty(
     }
 }
 
-async fn deserialize_params(
-    mut store: &mut Store<()>,
+async fn deserialize_params<T: Send>(
+    mut store: &mut Store<T>,
     instance: &bindings::Format,
     ty: &types::ComponentFunc,
     body: hyper::body::Incoming,
@@ -253,8 +253,10 @@ async fn deserialize_params(
     Ok(params)
 }
 
+struct Ctx(Option<(Store<Ctx>, Instance)>);
+
 struct Contract {
-    pre: InstancePre<()>,
+    pre: InstancePre<Ctx>,
     ty: types::Component,
 }
 
@@ -359,6 +361,43 @@ fn print_ty(out: &mut String, ty: Type) {
     }
 }
 
+fn compile_component(engine: &Engine, buf: &[u8]) -> anyhow::Result<Component> {
+    let mut enc = ComponentEncoder::default().module(&buf)?;
+    let buf = enc.encode()?;
+    Component::new(engine, buf).context("failed to compile component")
+}
+
+async fn fetch_component(engine: &Engine, src: &str) -> anyhow::Result<Component> {
+    let url = Url::parse(src).context("failed to parse URL")?;
+    if let Ok(path) = url.to_file_path() {
+        let buf = fs::read(&path)
+            .await
+            .with_context(|| format!("failed to read component from `{src}`"))?;
+        compile_component(engine, &buf)
+    } else {
+        let res = reqwest::get(url)
+            .await
+            .with_context(|| format!("failed to GET `{src}`"))?;
+        let buf = res
+            .bytes()
+            .await
+            .with_context(|| format!("failed to fetch component from `{src}`"))?;
+        compile_component(engine, &buf)
+    }
+}
+
+fn header_str(v: &http::HeaderValue) -> anyhow::Result<&str> {
+    v.to_str().context("header value is not valid UTF-8")
+}
+
+async fn fetch_component_from_header(
+    engine: &Engine,
+    src: &http::HeaderValue,
+) -> anyhow::Result<Component> {
+    let src = header_str(src)?;
+    fetch_component(engine, src).await
+}
+
 #[tokio::main]
 async fn main() -> wasmtime::Result<()> {
     let args = std::env::args();
@@ -381,10 +420,31 @@ async fn main() -> wasmtime::Result<()> {
                         return Ok(None);
                     };
                     let wasm = std::fs::read(entry.path())?;
-                    let mut wasm = ComponentEncoder::default().module(&wasm)?;
-                    let wasm = wasm.encode()?;
-                    let contract = Component::new(&engine, &wasm)?;
-                    let linker = Linker::new(&engine);
+                    let contract = compile_component(&engine, &wasm)?;
+                    let mut linker = Linker::new(&engine);
+                    for (name, ty) in contract.component_type().imports(&engine) {
+                        let types::ComponentItem::ComponentFunc(..) = ty else {
+                            continue;
+                        };
+                        let name = Arc::from(name);
+                        linker.root().func_new_async(&name, {
+                            let name = Arc::clone(&name);
+                            move |mut store, params, results| {
+                                let name = Arc::clone(&name);
+                                Box::new(async move {
+                                    let Ctx(Some((store, target))) = store.data_mut() else {
+                                        bail!("target component missing");
+                                    };
+                                    let f = target
+                                        .get_func(&mut *store, name.as_ref())
+                                        .context("function not found")?;
+                                    f.call_async(&mut *store, params, results).await?;
+                                    f.post_return_async(store).await?;
+                                    Ok(())
+                                })
+                            }
+                        })?;
+                    }
                     let ty = linker.substituted_component_type(&contract)?;
                     let pre = linker.instantiate_pre(&contract)?;
                     Ok(Some((name.into(), Contract { pre, ty })))
@@ -401,7 +461,7 @@ async fn main() -> wasmtime::Result<()> {
             async move {
                 let (
                     http::request::Parts {
-                        mut headers,
+                        headers,
                         method,
                         uri,
                         ..
@@ -422,25 +482,25 @@ async fn main() -> wasmtime::Result<()> {
                     );
                 }
 
-                let Some(name) = headers.remove("X-Contract") else {
+                let Some(contract) = headers.get("X-Contract") else {
                     return build_http_response(
                         http::StatusCode::BAD_REQUEST,
                         "`X-Contract` header missing",
                     );
                 };
-                let name = match name.to_str() {
-                    Ok(name) => name,
+                let contract = match header_str(contract) {
+                    Ok(contract) => contract,
                     Err(err) => {
                         return build_http_response(
                             http::StatusCode::BAD_REQUEST,
-                            format!("`X-Contract` header value is not valid UTF-8: {err}"),
+                            format!("Failed to parse `X-Contract` header value: {err}"),
                         );
                     }
                 };
-                let Some(Contract { pre, ty }) = contracts.get(name) else {
+                let Some(Contract { pre, ty }) = contracts.get(contract) else {
                     return build_http_response(
                         http::StatusCode::NOT_FOUND,
-                        format!("Contract `{name}` not' found"),
+                        format!("Contract `{contract}` not' found"),
                     );
                 };
                 let engine = pre.engine();
@@ -477,85 +537,71 @@ async fn main() -> wasmtime::Result<()> {
                         ))))
                     }
                     http::Method::POST => {
-                        let Some(func) = headers.remove("X-Func") else {
+                        let Some(func) = headers.get("X-Func") else {
                             return build_http_response(
                                 http::StatusCode::BAD_REQUEST,
                                 "`X-Func` header missing",
                             );
                         };
-                        let func = match func.to_str() {
+                        let func = match header_str(func) {
                             Ok(func) => func,
                             Err(err) => {
                                 return build_http_response(
                                     http::StatusCode::BAD_REQUEST,
-                                    format!("`X-Func` header value is not valid UTF-8: {err}"),
+                                    format!("Failed to parse `X-Func` header value: {err}"),
                                 );
                             }
                         };
 
-                        let Some(codec) = headers.remove("X-Codec") else {
+                        let Some(codec) = headers.get("X-Codec") else {
                             return build_http_response(
                                 http::StatusCode::BAD_REQUEST,
-                                "`X-Codec` header missing",
+                                format!("`X-Codec` header missing"),
                             );
                         };
-                        let codec = match codec.to_str() {
+                        let codec = match fetch_component_from_header(engine, codec).await {
                             Ok(codec) => codec,
                             Err(err) => {
                                 return build_http_response(
                                     http::StatusCode::BAD_REQUEST,
-                                    format!("`X-Codec` header value is not valid UTF-8: {err}"),
+                                    format!("Failed to acquire codec component: {err}"),
                                 );
                             }
                         };
-                        let url = match Url::parse(codec) {
-                            Ok(url) => url,
-                            Err(err) => {
-                                return build_http_response(
-                                    http::StatusCode::BAD_REQUEST,
-                                    format!("`X-Codec` header value is not a valid URL: {err}"),
-                                );
-                            }
-                        };
-                        let mut codec = if let Ok(path) = url.to_file_path() {
-                            match fs::read(&path).await {
-                                Ok(codec) => ComponentEncoder::default().module(&codec)?,
+
+                        let target = if let Some(target) = headers.get("X-Target") {
+                            let target = match header_str(target) {
+                                Ok(target) => target,
                                 Err(err) => {
                                     return build_http_response(
                                         http::StatusCode::BAD_REQUEST,
-                                        format!(
-                                            "Failed to read codec bytes from `{}`: {err}",
-                                            path.to_string_lossy()
-                                        ),
-                                    );
-                                }
-                            }
-                        } else {
-                            let res = match reqwest::get(url).await {
-                                Ok(codec) => codec,
-                                Err(err) => {
-                                    return build_http_response(
-                                        http::StatusCode::BAD_REQUEST,
-                                        format!("Failed to fetch codec from `{codec}`: {err}"),
+                                        format!("Failed to parse `X-Target` header value: {err}"),
                                     );
                                 }
                             };
-                            match res.bytes().await {
-                                Ok(codec) => ComponentEncoder::default().module(&codec)?,
+                            let Some(Contract { pre, .. }) = contracts.get(target) else {
+                                return build_http_response(
+                                    http::StatusCode::NOT_FOUND,
+                                    format!("Target component `{target}` not' found"),
+                                );
+                            };
+                            let mut store = Store::new(engine, Ctx(None));
+                            let target = match pre.instantiate_async(&mut store).await {
+                                Ok(target) => target,
                                 Err(err) => {
                                     return build_http_response(
                                         http::StatusCode::BAD_REQUEST,
-                                        format!(
-                                            "Failed to fetch codec bytes from `{codec}`: {err}"
-                                        ),
+                                        format!("Failed to instantiate target component: {err}"),
                                     );
                                 }
-                            }
+                            };
+                            Some((store, target))
+                        } else {
+                            None
                         };
-                        let codec = codec.encode()?;
-                        let codec = Component::new(engine, codec)?;
+
+                        let mut store = Store::new(engine, Ctx(target));
                         let linker = Linker::new(engine);
-                        let mut store = Store::new(engine, ());
                         let codec =
                             bindings::Format::instantiate_async(&mut store, &codec, &linker)
                                 .await?;
@@ -595,7 +641,7 @@ async fn main() -> wasmtime::Result<()> {
                             else {
                                 return build_http_response(
                                     http::StatusCode::NOT_FOUND,
-                                    format!("Function `{func}` not' found"),
+                                    format!("Function `{func}` not found"),
                                 );
                             };
                             let contract = pre.instantiate_async(&mut store).await?;
@@ -606,9 +652,12 @@ async fn main() -> wasmtime::Result<()> {
                         };
                         let params = deserialize_params(&mut store, &codec, &ty, body).await?;
                         let mut results = vec![Val::Bool(false); ty.results().len()];
-                        func.call_async(&mut store, &params, &mut results)
-                            .await
-                            .context("failed to call function")?;
+                        if let Err(err) = func.call_async(&mut store, &params, &mut results).await {
+                            return build_http_response(
+                                http::StatusCode::BAD_REQUEST,
+                                format!("Failed to call function: {err:#}"),
+                            );
+                        };
                         Ok(http::Response::new(http_body_util::Full::new(Bytes::from(
                             format!("{results:?}"),
                         ))))
