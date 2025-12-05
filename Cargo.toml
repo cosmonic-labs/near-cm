@@ -17,8 +17,7 @@ http = "1"
 http-body-util = "0.1"
 hyper = "1"
 hyper-util = { version = "0.1", features = ["http1", "server", "tokio"] }
-reqwest = "0.11"
-tokio = { version = "1", features = ["fs", "macros", "rt-multi-thread"] }
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread"] }
 tracing = "0.1"
 tracing-subscriber = "0.3"
 url = "2"

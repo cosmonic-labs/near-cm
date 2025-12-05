@@ -5,8 +5,9 @@ This repository contains a PoC showing unique features of component model, which
 ## Build and Run
 
 ```
-$ cargo build --target wasm32-unknown-unknown --release --manifest-path ./contract/Cargo.toml
-$ cargo run ./contract/target/wasm32-unknown-unknown/release
+$ cargo build --workspace --target wasm32-unknown-unknown --release --manifest-path ./contract/Cargo.toml
+$ cargo build --workspace --target wasm32-unknown-unknown --release --manifest-path ./wasm-serde/Cargo.toml
+$ cargo run ./contract/target/wasm32-unknown-unknown/release ./wasm-serde/target/wasm32-unknown-unknown/release
 ```
 
 ### Query
@@ -24,21 +25,27 @@ $ curl localhost:8080 -H "X-Contract: contract"
 ### Invocation
 
 ```
-$ curl localhost:8080 -H "X-Contract: contract" -H "X-Func: myapp:app/custom@0.1.0#greet" -H "X-Codec: https://github.com/rvolosatovs/wasm-serde/releases/download/poc-4/wasm_serde_json.wasm" -d '["world"]'
+$ curl localhost:8080 -H "X-Contract: contract" -H "X-Func: myapp:app/custom@0.1.0#greet" -H "X-Codec: wasm_serde_json" -d '["world"]'
 ```
 
 > [String("Hello, world!")]
 
 
 ```
-$ curl localhost:8080 -H "X-Contract: contract" -H "X-Func: myapp:app/custom@0.1.0#add" -H "X-Codec: https://github.com/rvolosatovs/wasm-serde/releases/download/poc-4/wasm_serde_json.wasm" -d '[3, 5]'
+$ curl localhost:8080 -H "X-Contract: contract" -H "X-Func: myapp:app/custom@0.1.0#add" -H "X-Codec: wasm_serde_json" -d '[3, 5]'
 ```
 
 > [U64(8)]
 
 
 ```
-$ curl localhost:8080 -H "X-Contract: contract" -H "X-Func: myapp:app/custom@0.1.0#foo" -H "X-Codec: https://github.com/rvolosatovs/wasm-serde/releases/download/poc-4/wasm_serde_json.wasm" -H "X-Target: mul" -d '[{"foo":"myfoo","bar":"mybar"}]'
+$ curl localhost:8080 -H "X-Contract: contract" -H "X-Func: myapp:app/custom@0.1.0#foo" -H "X-Codec: wasm_serde_json" -H "X-Target: mul" -d '[{"foo":"myfoo","bar":"mybar"}]'
+```
+
+Alternatively, use TOML:
+
+```
+curl localhost:8080 -H "X-Contract: contract" -H "X-Func: myapp:app/custom@0.1.0#foo" -H "X-Codec: wasm_serde_toml" -H "X-Target: mul" -d '[{ foo = "myfoo", bar = "mybar" }]'
 ```
 
 > [U64(42)]
