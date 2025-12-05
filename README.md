@@ -97,6 +97,8 @@ This input is sourced from: https://pikespeak.ai/transaction-viewer/8rEAAvvj1SNB
 
 ### Methodology
 
+Wasmtime is configured using the same configuration as [currently used by `nearcore`](https://github.com/near/nearcore/blob/71aba039e747aa72939e8389558a19c1cfdd4dc3/runtime/near-vm-runner/src/wasmtime_runner/mod.rs#L384-L443), except for adding component model support.
+
 #### Modules
 
 We only measure a single Wasm module:
@@ -849,3 +851,17 @@ address sizes	: 48 bits physical, 48 bits virtual
 power management:
 ```
 </details>
+
+### Conclusions
+
+It is clear that component model today carries a performance penalty, which is significant for NEAR.
+
+Bundling `serde_json` in the component provides near-identical performance with a payload, which is representative of the kind of payloads used by NEAR today.
+
+Extracting the codec into a separate component, whether executed via component composition or via "runtime composition" handled by the host, unfortunately, carries a heavy performance penalty, at least today.
+
+The "bundling" case, whether modules or components, relies on generated, optimized implemetation for deserialization of the buffer into the Rust struct. Using an external codec, we are forced to rely on dynamic implementation and simply cannot provide the same optimizations.
+
+This benchmark suite was used to optimize the codec and drive the interface design, however there are still opportunities for optimizing the codec. It seems unlikely that an external codec approach would be able to match the performance of bundled `serde_json` with statically generated deserializer implementation in the foreseeable future.
+
+An important observation is that component composition carries a significant performance penalty, which is apparent by looking at the `noop`, round-trip benchmark for the composed component case.
