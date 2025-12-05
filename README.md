@@ -214,7 +214,7 @@ This benchmark represents the cost of invoking `run-big-typed` without any deser
 
 Benchmarks were run on a machine provisioned for us by NEAR.
 
-Generated `critertion` report for this benchmark can be found at [`./benches/criterion-report`](./benches/criterion-report).
+Generated `criterion` report for this benchmark can be found at [`./benches/criterion-report`](./benches/criterion-report).
 
 <details>
     <summary><code>cargo bench</code></summary>
