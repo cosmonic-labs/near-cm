@@ -15,7 +15,7 @@ use wasmtime::component::{Component, HasSelf};
 use wasmtime::{Caller, Engine, Extern, Module, ModuleExport, Store, component};
 use wit_component::ComponentEncoder;
 
-use crate::codec_bindings::exports::cosmonic::serde::reflect;
+use crate::codec_bindings::exports::cosmonic::reflect::reflect;
 
 const SMALL_INPUT: &[u8] = br#"{"a": "test", "b": 42, "c": [0, 1, 2] }"#;
 
@@ -66,7 +66,7 @@ mod codec_bindings {
         world: "format",
     });
 
-    use exports::cosmonic::serde::reflect::{Guest, List, Value};
+    use exports::cosmonic::reflect::reflect::{Guest, List, Value};
     use wasmtime::Store;
 
     macro_rules! impl_unwrap_value_primitive {
@@ -181,7 +181,7 @@ fn unwrap_big_input_element_payload(
 
 fn unwrap_big_input_element<T>(
     store: &mut Store<T>,
-    reflect: &codec_bindings::exports::cosmonic::serde::reflect::Guest,
+    reflect: &codec_bindings::exports::cosmonic::reflect::reflect::Guest,
     fields: impl IntoIterator<Item = reflect::Value>,
 ) -> bindings::BigInputElement {
     let mut fields = fields.into_iter();
@@ -203,7 +203,7 @@ fn unwrap_big_input_element<T>(
 
 fn unwrap_big_input<T>(
     mut store: &mut Store<T>,
-    reflect: &codec_bindings::exports::cosmonic::serde::reflect::Guest,
+    reflect: &codec_bindings::exports::cosmonic::reflect::reflect::Guest,
     v: reflect::Value,
 ) -> bindings::BigInput {
     let fields = v.unwrap_record(store, reflect);
@@ -440,7 +440,7 @@ fn bench_component(
                 || {
                     let (codec, mut codec_store) = setup_codec();
                     let c_ty = codec
-                        .cosmonic_serde_reflect()
+                        .cosmonic_reflect_reflect()
                         .tuple_type()
                         .call_constructor(
                             &mut codec_store,
@@ -448,7 +448,7 @@ fn bench_component(
                         )
                         .unwrap();
                     let ty = codec
-                        .cosmonic_serde_reflect()
+                        .cosmonic_reflect_reflect()
                         .record_type()
                         .call_constructor(
                             &mut codec_store,
@@ -469,7 +469,8 @@ fn bench_component(
                         .unwrap()
                         .unwrap();
 
-                    let fields = v.unwrap_record(&mut codec_store, codec.cosmonic_serde_reflect());
+                    let fields =
+                        v.unwrap_record(&mut codec_store, codec.cosmonic_reflect_reflect());
                     let mut fields = fields.into_iter();
 
                     let a = fields.next().unwrap().unwrap_string();
@@ -477,7 +478,7 @@ fn bench_component(
                     let c_values = fields
                         .next()
                         .unwrap()
-                        .unwrap_tuple(&mut codec_store, codec.cosmonic_serde_reflect());
+                        .unwrap_tuple(&mut codec_store, codec.cosmonic_reflect_reflect());
                     let mut c_values = c_values.into_iter();
 
                     let c0 = c_values.next().unwrap().unwrap_u32();
@@ -539,7 +540,7 @@ fn bench_component(
                 let (codec, mut codec_store) = setup_codec();
 
                 let payload_ty = codec
-                    .cosmonic_serde_reflect()
+                    .cosmonic_reflect_reflect()
                     .record_type()
                     .call_constructor(
                         &mut codec_store,
@@ -552,7 +553,7 @@ fn bench_component(
                     .unwrap();
 
                 let signed_ty = codec
-                    .cosmonic_serde_reflect()
+                    .cosmonic_reflect_reflect()
                     .record_type()
                     .call_constructor(
                         &mut codec_store,
@@ -566,7 +567,7 @@ fn bench_component(
                     .unwrap();
 
                 let ty = codec
-                    .cosmonic_serde_reflect()
+                    .cosmonic_reflect_reflect()
                     .record_type()
                     .call_constructor(
                         &mut codec_store,
@@ -586,7 +587,7 @@ fn bench_component(
                     .unwrap()
                     .unwrap();
 
-                let input = unwrap_big_input(&mut codec_store, codec.cosmonic_serde_reflect(), v);
+                let input = unwrap_big_input(&mut codec_store, codec.cosmonic_reflect_reflect(), v);
                 runner
                     .call_run_big_typed(&mut runner_store, &input)
                     .unwrap();
@@ -663,7 +664,7 @@ fn compose(runner: impl Into<Vec<u8>>, codec: impl Into<Vec<u8>>) -> anyhow::Res
     let codec = graph.instantiate(codec);
 
     let deserializer = graph.alias_instance_export(codec, "cosmonic:serde/deserializer@0.1.0")?;
-    let reflect = graph.alias_instance_export(codec, "cosmonic:serde/reflect@0.1.0")?;
+    let reflect = graph.alias_instance_export(codec, "cosmonic:reflect/reflect@0.1.0")?;
 
     let noop = graph.alias_instance_export(runner, "noop")?;
 
@@ -677,7 +678,7 @@ fn compose(runner: impl Into<Vec<u8>>, codec: impl Into<Vec<u8>>) -> anyhow::Res
     let run_big_typed = graph.alias_instance_export(runner, "run-big-typed")?;
 
     graph.set_instantiation_argument(runner, "cosmonic:serde/deserializer@0.1.0", deserializer)?;
-    graph.set_instantiation_argument(runner, "cosmonic:serde/reflect@0.1.0", reflect)?;
+    graph.set_instantiation_argument(runner, "cosmonic:reflect/reflect@0.1.0", reflect)?;
     graph.export(noop, "noop")?;
     graph.export(run_small, "run-small")?;
     graph.export(run_big, "run-big")?;

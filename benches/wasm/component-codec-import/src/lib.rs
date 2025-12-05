@@ -1,7 +1,7 @@
 use bench::bindings::{BigInput, BigInputElement, BigInputElementPayload, SmallInput};
 use bench::{assert_big_input, assert_small_input};
 use bindings::cosmonic::serde::deserializer;
-use bindings::cosmonic::serde::reflect::{
+use bindings::cosmonic::reflect::reflect::{
     List, ListType, RecordType, RecordValue, TupleType, TupleValue, Type, Value,
 };
 use std::sync::LazyLock;
@@ -12,6 +12,7 @@ mod bindings {
     wit_bindgen::generate!({
         path: "../../../wasm-serde/wit",
         world: "imports",
+        generate_all,
     });
 }
 
