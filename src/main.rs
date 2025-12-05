@@ -25,7 +25,7 @@ use wasmtime::component::{Component, Instance, InstancePre, Linker, Type, Val, t
 use wasmtime::{Engine, Store};
 use wit_component::ComponentEncoder;
 
-use bindings::exports::rvolosatovs::serde::reflect;
+use bindings::exports::cosmonic::serde::reflect;
 
 pub struct Error;
 
@@ -205,18 +205,18 @@ async fn deserialize_params<T: Send>(
 
     let mut reflect_tys = Vec::with_capacity(ty.params().len());
     for (_, ty) in ty.params() {
-        let ty = make_reflect_ty(store, instance.rvolosatovs_serde_reflect(), ty).await?;
+        let ty = make_reflect_ty(store, instance.cosmonic_serde_reflect(), ty).await?;
         reflect_tys.push(ty);
     }
     let reflect_ty = instance
-        .rvolosatovs_serde_reflect()
+        .cosmonic_serde_reflect()
         .tuple_type()
         .call_constructor(&mut store, &reflect_tys)
         .await?;
 
     let body = body.collect().await?;
     let values = match instance
-        .rvolosatovs_serde_deserializer()
+        .cosmonic_serde_deserializer()
         .call_from_list(
             &mut store,
             &body.to_bytes(),
@@ -227,7 +227,7 @@ async fn deserialize_params<T: Send>(
         Ok(value) => value,
         Err(err) => {
             let err = instance
-                .rvolosatovs_serde_deserializer()
+                .cosmonic_serde_deserializer()
                 .error()
                 .call_to_string(store, err)
                 .await?;
@@ -238,7 +238,7 @@ async fn deserialize_params<T: Send>(
         bail!("deserialized value is not a tuple");
     };
     let values = instance
-        .rvolosatovs_serde_reflect()
+        .cosmonic_serde_reflect()
         .tuple_value()
         .call_into_value(&mut store, values)
         .await?;
@@ -246,7 +246,7 @@ async fn deserialize_params<T: Send>(
 
     let mut params = Vec::with_capacity(num_params);
     for ((name, ty), v) in zip(tys, values) {
-        let v = unwrap_val(store, v, instance.rvolosatovs_serde_reflect(), ty)
+        let v = unwrap_val(store, v, instance.cosmonic_serde_reflect(), ty)
             .await
             .with_context(|| format!("failed to unwrap param `{name}`"))?;
         params.push(v);

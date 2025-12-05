@@ -1,7 +1,7 @@
 use bench::bindings::{BigInput, BigInputElement, BigInputElementPayload, SmallInput};
 use bench::{assert_big_input, assert_small_input};
-use bindings::rvolosatovs::serde::deserializer;
-use bindings::rvolosatovs::serde::reflect::{
+use bindings::cosmonic::serde::deserializer;
+use bindings::cosmonic::serde::reflect::{
     List, ListType, RecordType, RecordValue, TupleType, TupleValue, Type, Value,
 };
 use std::sync::LazyLock;
